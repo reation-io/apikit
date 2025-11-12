@@ -236,14 +236,16 @@ func GenerateCodeByType(varName, fieldName, typeName string, field *parser.Field
 
 			// Generate extraction code with the custom parser
 			code, imports = GenerateExtractionCode(varName, fieldName, typeName, field, parsingFunc, imports)
-		} else {
+		} else if !field.IsEmbedded {
 			// Fallback: for unknown custom types (e.g., enums), cast the string value
 			// This handles types like model.AgentStatus, model.UserRole, etc.
+			// BUT: Skip embedded structs - they should have been expanded by the parser
 			parsingFunc := func(v, f string) string {
 				return fmt.Sprintf(`payload.%s = %s(%s)`, f, typeName, v)
 			}
 			code, imports = GenerateExtractionCode(varName, fieldName, typeName, field, parsingFunc, imports)
 		}
+		// else: Embedded struct without extractor - skip (should have been expanded)
 	}
 
 	return code, imports

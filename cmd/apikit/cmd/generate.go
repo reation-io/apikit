@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/reation-io/apikit/pkg/generator/checksum"
 	"github.com/reation-io/apikit/pkg/generator/codegen"
 	_ "github.com/reation-io/apikit/pkg/generator/extractors"
 	"github.com/reation-io/apikit/pkg/generator/parser"
@@ -16,6 +17,7 @@ import (
 var (
 	sourceFile string
 	outputFile string
+	force      bool
 )
 
 // generateCmd represents the generate command
@@ -49,40 +51,72 @@ func init() {
 
 	generateCmd.Flags().StringVarP(&sourceFile, "file", "f", "", "source file to process (defaults to GOFILE env var)")
 	generateCmd.Flags().StringVarP(&outputFile, "output", "o", "", "output file (defaults to <source>_apikit.go)")
+	generateCmd.Flags().BoolVar(&force, "force", false, "force regeneration even if source hasn't changed")
 }
 
 func runGenerate(cmd *cobra.Command, args []string) error {
-	// Determine source file
-	if sourceFile == "" {
-		// When called from go:generate, GOFILE env var contains the source file
-		sourceFile = os.Getenv("GOFILE")
-		if sourceFile == "" {
-			return fmt.Errorf("no source file specified\n" +
-				"Use --file flag or call from //go:generate directive:\n" +
-				"  //go:generate apikit generate")
-		}
+	// Check for APIKIT_FORCE environment variable
+	// This allows: APIKIT_FORCE=1 go generate ./internal/...
+	if !force && os.Getenv("APIKIT_FORCE") != "" {
+		force = true
 	}
 
-	// Get current directory (where go generate was called)
+	// Collect all source files to process
+	var sourceFiles []string
+
+	// If --file flag is provided, use it
+	if sourceFile != "" {
+		sourceFiles = append(sourceFiles, sourceFile)
+	}
+
+	// Add any positional arguments as source files
+	sourceFiles = append(sourceFiles, args...)
+
+	// If no files specified, try GOFILE env var (from go:generate)
+	if len(sourceFiles) == 0 {
+		goFile := os.Getenv("GOFILE")
+		if goFile == "" {
+			return fmt.Errorf("no source file specified\n" +
+				"Use --file flag, provide files as arguments, or call from //go:generate directive:\n" +
+				"  //go:generate apikit generate\n" +
+				"  apikit generate file1.go file2.go\n" +
+				"  apikit generate --file file.go")
+		}
+		sourceFiles = append(sourceFiles, goFile)
+	}
+
+	// Get current directory
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting current directory: %w", err)
 	}
 
-	sourceFilePath := filepath.Join(cwd, sourceFile)
-
-	// Check if source file exists
-	if _, err := os.Stat(sourceFilePath); os.IsNotExist(err) {
-		return fmt.Errorf("source file not found: %s", sourceFilePath)
+	// Resolve and validate all source files
+	var resolvedFiles []string
+	for _, file := range sourceFiles {
+		filePath := filepath.Join(cwd, file)
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			return fmt.Errorf("source file not found: %s", filePath)
+		}
+		resolvedFiles = append(resolvedFiles, filePath)
 	}
 
 	if verbose {
-		log.Printf("Processing file: %s", sourceFilePath)
+		log.Printf("Processing %d file(s)...", len(resolvedFiles))
 	}
 
-	// Run generation
-	if err := generate(sourceFilePath); err != nil {
-		return err
+	// Create a single parser instance to share cache across all files
+	p := parser.New()
+
+	// Process each file
+	for i, sourceFilePath := range resolvedFiles {
+		if verbose {
+			log.Printf("[%d/%d] Processing %s", i+1, len(resolvedFiles), sourceFilePath)
+		}
+
+		if err := generateWithParser(p, sourceFilePath); err != nil {
+			return fmt.Errorf("processing %s: %w", sourceFilePath, err)
+		}
 	}
 
 	if verbose {
@@ -92,9 +126,27 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func generate(sourceFilePath string) error {
-	// Create parser
-	p := parser.New()
+func generateWithParser(p *parser.Parser, sourceFilePath string) error {
+	// Determine output file name
+	output := outputFile
+	if output == "" {
+		output = strings.TrimSuffix(sourceFilePath, ".go") + "_apikit.go"
+	}
+
+	// Check if source has changed (unless --force is used)
+	if !force {
+		changed, err := checksum.HasSourceChanged(sourceFilePath, output)
+		if err != nil {
+			if verbose {
+				log.Printf("Warning: could not check if source changed: %v", err)
+			}
+		} else if !changed {
+			if verbose {
+				log.Printf("Source unchanged, skipping %s", sourceFilePath)
+			}
+			return nil
+		}
+	}
 
 	// Parse the source file
 	if verbose {
@@ -150,11 +202,12 @@ func generate(sourceFilePath string) error {
 		return fmt.Errorf("generating code: %w", err)
 	}
 
-	// Determine output file name
-	output := outputFile
-	if output == "" {
-		output = strings.TrimSuffix(sourceFilePath, ".go") + "_apikit.go"
+	// Calculate source checksum and add to generated code
+	sourceChecksum, err := checksum.CalculateFileChecksum(sourceFilePath)
+	if err != nil {
+		return fmt.Errorf("calculating source checksum: %w", err)
 	}
+	code = checksum.AddChecksumToGenerated(code, sourceChecksum)
 
 	if dryRun {
 		fmt.Printf("Would write to %s:\n", output)

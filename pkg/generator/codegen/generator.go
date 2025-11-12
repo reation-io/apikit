@@ -166,10 +166,12 @@ func (g *Generator) generateExtractionCode(s *parser.Struct, importsMap map[stri
 	// Process each field
 	for _, field := range s.Fields {
 		// Handle embedded structs - expand their fields
-		if field.IsEmbedded && field.NestedStruct != nil {
-			nestedCode := g.generateExtractionCode(field.NestedStruct, importsMap)
-			if nestedCode != "" {
-				lines = append(lines, nestedCode)
+		if field.IsEmbedded {
+			if field.NestedStruct != nil {
+				nestedCode := g.generateExtractionCode(field.NestedStruct, importsMap)
+				if nestedCode != "" {
+					lines = append(lines, nestedCode)
+				}
 			}
 			continue
 		}
@@ -209,14 +211,16 @@ func (g *Generator) hasBodyFields(s *parser.Struct) bool {
 			}
 		}
 
+		// Field is a body field if:
+		// 1. It has IsBody = true (from "in: body" comment), OR
+		// 2. It has json:"body" tag
 		if field.IsBody {
 			return true
 		}
 
-		// Check if field has json tag
 		if field.StructTag != "" {
 			tag := reflect.StructTag(field.StructTag)
-			if _, ok := tag.Lookup("json"); ok {
+			if jsonTag, ok := tag.Lookup("json"); ok && jsonTag == "body" {
 				return true
 			}
 		}

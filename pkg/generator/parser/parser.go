@@ -5,26 +5,35 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"strings"
-
-	"golang.org/x/tools/go/packages"
 )
 
 // Parser analyzes Go source files to find apikit handlers
 type Parser struct {
-	fset       *token.FileSet
-	structs    map[string]*Struct           // Cache of parsed structs
-	loadedPkgs map[string]*packages.Package // Cache of loaded packages
-	currentDir string                       // Directory of the file being parsed
+	fset               *token.FileSet
+	structs            map[string]*Struct           // Cache of parsed structs
+	externalStructs    map[string]*Struct           // Cache of external structs by "importPath.StructName"
+	structImportsCache map[string]map[string]string // Cache of imports for each external struct
+	parsedFiles        map[string]bool              // Cache of already parsed files
+	fileImportsCache   map[string]map[string]string // Cache of file imports by file path
+	importPathCache    map[string]string            // Cache of resolved import paths
+	goModPath          string                       // Cached path to go.mod
+	moduleName         string                       // Cached module name from go.mod
+	currentDir         string                       // Directory of the file being parsed
 }
 
 // New creates a new Parser instance
 func New() *Parser {
 	return &Parser{
-		fset:       token.NewFileSet(),
-		structs:    make(map[string]*Struct),
-		loadedPkgs: make(map[string]*packages.Package),
+		fset:               token.NewFileSet(),
+		structs:            make(map[string]*Struct),
+		externalStructs:    make(map[string]*Struct),
+		structImportsCache: make(map[string]map[string]string),
+		parsedFiles:        make(map[string]bool),
+		fileImportsCache:   make(map[string]map[string]string),
+		importPathCache:    make(map[string]string),
 	}
 }
 
@@ -300,7 +309,7 @@ func (p *Parser) parseField(field *ast.Field) []Field {
 		typeName := p.getTypeName(field.Type)
 		f := Field{
 			Name:          typeName,
-			Type:          fieldType,
+			Type:          fieldType, // This contains the full type with package prefix
 			IsEmbedded:    true,
 			IsSlice:       isSlice,
 			SliceType:     sliceType,
@@ -522,7 +531,12 @@ func (p *Parser) resolveNestedStructsRecursive(s *Struct, visited map[string]boo
 			copy(field.NestedStruct.Fields, nestedStruct.Fields)
 
 			// Recursively resolve nested structs within this struct
-			p.resolveNestedStructsRecursive(field.NestedStruct, visited, imports)
+			// Use cached imports if available, otherwise use current imports
+			structImports := imports
+			if cachedImports, ok := p.structImportsCache[typeName]; ok {
+				structImports = cachedImports
+			}
+			p.resolveNestedStructsRecursive(field.NestedStruct, visited, structImports)
 			continue
 		}
 
@@ -533,6 +547,8 @@ func (p *Parser) resolveNestedStructsRecursive(s *Struct, visited map[string]boo
 				if externalStruct != nil {
 					// Cache it with full name for future lookups
 					p.structs[typeName] = externalStruct
+					// Cache the imports for this struct
+					p.structImportsCache[typeName] = externalImports
 
 					// Check for circular reference
 					if visited[typeName] {
@@ -560,42 +576,56 @@ func (p *Parser) resolveNestedStructsRecursive(s *Struct, visited map[string]boo
 	}
 }
 
-// loadExternalStruct loads a struct definition from an external package
-func (p *Parser) loadExternalStruct(importPath, structName string) (*Struct, map[string]string) {
-	// Check if package is already loaded
-	if pkg, ok := p.loadedPkgs[importPath]; ok {
-		return p.findStructInPackage(pkg, structName)
-	}
-
-	// Load the package
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes,
-		Dir:  p.currentDir,
-	}
-
-	pkgs, err := packages.Load(cfg, importPath)
-	if err != nil || len(pkgs) == 0 {
-		return nil, nil
-	}
-
-	pkg := pkgs[0]
-	if len(pkg.Errors) > 0 {
-		return nil, nil
-	}
-
-	// Cache the package
-	p.loadedPkgs[importPath] = pkg
-
-	return p.findStructInPackage(pkg, structName)
-}
-
-// findStructInPackage searches for a struct definition in a loaded package
+// loadExternalStruct loads a struct from an external package using fast file-based parsing
 // Returns the struct and the imports from the file where it was found
-func (p *Parser) findStructInPackage(pkg *packages.Package, structName string) (*Struct, map[string]string) {
-	for _, file := range pkg.Syntax {
+func (p *Parser) loadExternalStruct(importPath, structName string) (*Struct, map[string]string) {
+	// Check cache first
+	cacheKey := importPath + "." + structName
+	if cached, ok := p.externalStructs[cacheKey]; ok {
+		// Return cached struct with its cached imports
+		cachedImports := p.structImportsCache[cacheKey]
+		return cached, cachedImports
+	}
+
+	// Resolve the import path to a directory
+	pkgDir := p.resolveImportPath(importPath)
+	if pkgDir == "" {
+		return nil, nil
+	}
+
+	// Find all Go files in the package directory
+	files, err := filepath.Glob(filepath.Join(pkgDir, "*.go"))
+	if err != nil {
+		return nil, nil
+	}
+
+	// Parse each file looking for the struct
+	for _, file := range files {
+		// Skip test files
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+
+		// Check if file was already parsed
+		if cachedImports, ok := p.fileImportsCache[file]; ok {
+			// File already parsed, check if struct is in cache
+			structCacheKey := importPath + "." + structName
+			if cachedStruct, ok := p.externalStructs[structCacheKey]; ok {
+				return cachedStruct, cachedImports
+			}
+			// Struct not in this file, skip it
+			continue
+		}
+
+		// Parse the file
+		src, err := parser.ParseFile(p.fset, file, nil, parser.ParseComments)
+		if err != nil {
+			continue
+		}
+
 		// Collect imports from this file
 		fileImports := make(map[string]string)
-		for _, imp := range file.Imports {
+		for _, imp := range src.Imports {
 			path := strings.Trim(imp.Path.Value, `"`)
 			alias := filepath.Base(path)
 			if imp.Name != nil {
@@ -604,7 +634,13 @@ func (p *Parser) findStructInPackage(pkg *packages.Package, structName string) (
 			fileImports[alias] = path
 		}
 
-		for _, decl := range file.Decls {
+		// Cache the imports
+		p.fileImportsCache[file] = fileImports
+
+		// Parse ALL structs in this file and cache them
+		// This way we only parse each file once
+		var foundStruct *Struct
+		for _, decl := range src.Decls {
 			genDecl, ok := decl.(*ast.GenDecl)
 			if !ok {
 				continue
@@ -612,7 +648,7 @@ func (p *Parser) findStructInPackage(pkg *packages.Package, structName string) (
 
 			for _, spec := range genDecl.Specs {
 				typeSpec, ok := spec.(*ast.TypeSpec)
-				if !ok || typeSpec.Name.Name != structName {
+				if !ok {
 					continue
 				}
 
@@ -621,13 +657,107 @@ func (p *Parser) findStructInPackage(pkg *packages.Package, structName string) (
 					continue
 				}
 
-				// Found the struct, parse it and return with its file's imports
-				return p.parseStruct(structName, structType, typeSpec), fileImports
+				// Parse and cache this struct
+				s := p.parseStruct(typeSpec.Name.Name, structType, typeSpec)
+				structCacheKey := importPath + "." + typeSpec.Name.Name
+				p.externalStructs[structCacheKey] = s
+				// Cache the imports for this struct
+				p.structImportsCache[structCacheKey] = fileImports
+
+				// Check if this is the struct we're looking for
+				if typeSpec.Name.Name == structName {
+					foundStruct = s
+				}
 			}
+		}
+
+		// Mark as parsed AFTER we've cached all structs
+		p.parsedFiles[file] = true
+
+		// If we found the struct we were looking for, return it
+		if foundStruct != nil {
+			return foundStruct, fileImports
 		}
 	}
 
 	return nil, nil
+}
+
+// resolveImportPath converts an import path to a filesystem directory
+func (p *Parser) resolveImportPath(importPath string) string {
+	// Check cache first
+	if cached, ok := p.importPathCache[importPath]; ok {
+		return cached
+	}
+
+	if p.currentDir == "" {
+		return ""
+	}
+
+	// Find go.mod once and cache it
+	if p.goModPath == "" {
+		p.goModPath = p.findGoMod(p.currentDir)
+		if p.goModPath == "" {
+			return ""
+		}
+	}
+
+	// Read module name once and cache it
+	if p.moduleName == "" {
+		modContent, err := os.ReadFile(p.goModPath)
+		if err != nil {
+			return ""
+		}
+
+		// Extract module name from first line: "module github.com/user/repo"
+		lines := strings.Split(string(modContent), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "module ") {
+				p.moduleName = strings.TrimPrefix(line, "module ")
+				p.moduleName = strings.TrimSpace(p.moduleName)
+				break
+			}
+		}
+
+		if p.moduleName == "" {
+			return ""
+		}
+	}
+
+	// Check if import path starts with module name
+	if !strings.HasPrefix(importPath, p.moduleName) {
+		return ""
+	}
+
+	// Convert import path to relative path
+	relPath := strings.TrimPrefix(importPath, p.moduleName)
+	relPath = strings.TrimPrefix(relPath, "/")
+
+	// Build full path
+	moduleDir := filepath.Dir(p.goModPath)
+	result := filepath.Join(moduleDir, relPath)
+
+	// Cache the result
+	p.importPathCache[importPath] = result
+
+	return result
+}
+
+// findGoMod searches for go.mod file starting from dir and going up
+func (p *Parser) findGoMod(dir string) string {
+	for {
+		modPath := filepath.Join(dir, "go.mod")
+		if _, err := os.Stat(modPath); err == nil {
+			return modPath
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 // hasApikitComment checks if a function has the apikit:handler comment
