@@ -48,7 +48,7 @@ func init() {
 	rootCmd.AddCommand(generateCmd)
 
 	generateCmd.Flags().StringVarP(&sourceFile, "file", "f", "", "source file to process (defaults to GOFILE env var)")
-	generateCmd.Flags().StringVarP(&outputFile, "output", "o", "", "output file (defaults to <source>_apikit_gen.go)")
+	generateCmd.Flags().StringVarP(&outputFile, "output", "o", "", "output file (defaults to <source>_apikit.go)")
 }
 
 func runGenerate(cmd *cobra.Command, args []string) error {
@@ -153,7 +153,7 @@ func generate(sourceFilePath string) error {
 	// Determine output file name
 	output := outputFile
 	if output == "" {
-		output = strings.TrimSuffix(sourceFilePath, ".go") + "_apikit_gen.go"
+		output = strings.TrimSuffix(sourceFilePath, ".go") + "_apikit.go"
 	}
 
 	if dryRun {
