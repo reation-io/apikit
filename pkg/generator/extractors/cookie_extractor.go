@@ -39,7 +39,7 @@ func (e *CookieExtractor) GenerateCode(field *parser.Field, structName string) (
 	fieldName := field.Name
 	typeName := GetBaseType(field)
 
-	varName := fmt.Sprintf(`getCookie(r, "%s")`, cookieName)
+	varName := fmt.Sprintf(`apikit.GetCookie(r, "%s")`, cookieName)
 
 	// Use the public helper to generate code based on type
 	return GenerateCodeByType(varName, fieldName, typeName, field)

@@ -237,8 +237,12 @@ func GenerateCodeByType(varName, fieldName, typeName string, field *parser.Field
 			// Generate extraction code with the custom parser
 			code, imports = GenerateExtractionCode(varName, fieldName, typeName, field, parsingFunc, imports)
 		} else {
-			// Fallback: for unknown types, just assign the string value
-			code = fmt.Sprintf(`payload.%s = %s`, fieldName, varName)
+			// Fallback: for unknown custom types (e.g., enums), cast the string value
+			// This handles types like model.AgentStatus, model.UserRole, etc.
+			parsingFunc := func(v, f string) string {
+				return fmt.Sprintf(`payload.%s = %s(%s)`, f, typeName, v)
+			}
+			code, imports = GenerateExtractionCode(varName, fieldName, typeName, field, parsingFunc, imports)
 		}
 	}
 
