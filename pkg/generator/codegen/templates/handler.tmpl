@@ -23,14 +23,19 @@ func {{ .WrapperName }}(handler func(context.Context, {{ .ParamType }}{{ if .Has
 
 		// Parse request parameters
 		if err := {{ .ParseFuncName }}(w, r, &payload); err != nil {
-			apikit.HandleError(w, apikit.BadRequest(err.Error()))
+			apikit.HandleError(w, apikit.BadRequest("failed to parse request").WithCause(err))
 			return
 		}
 
 		{{- if .HasValidation }}
 		// Validate request payload
 		if err := validator.StructCtx(r.Context(), &payload); err != nil {
-			apikit.HandleError(w, apikit.UnprocessableEntity(err.Error()))
+			// Preserve structured validation errors
+			if valErr, ok := err.(validator.ValidationError); ok {
+				apikit.HandleError(w, apikit.UnprocessableEntity(valErr.Message).WithDetails(valErr.FieldErrors))
+			} else {
+				apikit.HandleError(w, apikit.UnprocessableEntity("validation failed").WithCause(err))
+			}
 			return
 		}
 		{{- end }}

@@ -120,7 +120,7 @@ func (g *Generator) prepareHandlerData(handler *parser.Handler, importsMap map[s
 	hd := HandlerData{
 		Name:              handler.Name,
 		WrapperName:       toCamelCasePrivate(handler.Name) + "APIKit",
-		ParseFuncName:     "parse" + handler.Name + "Request",
+		ParseFuncName:     "parse" + capitalize(handler.Name) + "Request",
 		ParamType:         handler.ParamType,
 		ReturnType:        handler.ReturnType,
 		HasResponseWriter: handler.HasResponseWriter,
@@ -283,5 +283,17 @@ func toCamelCasePrivate(s string) string {
 	// Convert first character to lowercase
 	runes := []rune(s)
 	runes[0] = []rune(strings.ToLower(string(runes[0])))[0]
+	return string(runes)
+}
+
+// capitalize converts the first letter to uppercase (PascalCase)
+// Example: "listTransactions" -> "ListTransactions", "getUser" -> "GetUser"
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	// Convert first character to uppercase
+	runes := []rune(s)
+	runes[0] = []rune(strings.ToUpper(string(runes[0])))[0]
 	return string(runes)
 }

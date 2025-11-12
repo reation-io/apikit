@@ -5,25 +5,38 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"path/filepath"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 )
 
 // Parser analyzes Go source files to find apikit handlers
 type Parser struct {
-	fset    *token.FileSet
-	structs map[string]*Struct // Cache of parsed structs
+	fset       *token.FileSet
+	structs    map[string]*Struct           // Cache of parsed structs
+	loadedPkgs map[string]*packages.Package // Cache of loaded packages
+	currentDir string                       // Directory of the file being parsed
 }
 
 // New creates a new Parser instance
 func New() *Parser {
 	return &Parser{
-		fset:    token.NewFileSet(),
-		structs: make(map[string]*Struct),
+		fset:       token.NewFileSet(),
+		structs:    make(map[string]*Struct),
+		loadedPkgs: make(map[string]*packages.Package),
 	}
 }
 
 // ParseFile analyzes a single Go file and extracts handler information
 func (p *Parser) ParseFile(filename string) (*ParseResult, error) {
+	// Store the directory of the file being parsed
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		return nil, fmt.Errorf("getting absolute path: %w", err)
+	}
+	p.currentDir = filepath.Dir(absPath)
+
 	// Parse the file
 	file, err := parser.ParseFile(p.fset, filename, nil, parser.ParseComments)
 	if err != nil {
@@ -38,6 +51,17 @@ func (p *Parser) ParseFile(filename string) (*ParseResult, error) {
 			Package:  file.Name.Name,
 		},
 		Warnings: []string{},
+	}
+
+	// Collect imports for resolving external types
+	imports := make(map[string]string) // alias -> import path
+	for _, imp := range file.Imports {
+		path := strings.Trim(imp.Path.Value, `"`)
+		alias := filepath.Base(path)
+		if imp.Name != nil {
+			alias = imp.Name.Name
+		}
+		imports[alias] = path
 	}
 
 	// First pass: collect all struct definitions
@@ -55,7 +79,7 @@ func (p *Parser) ParseFile(filename string) (*ParseResult, error) {
 	// Resolve nested structs in all fields with circular reference detection
 	for _, s := range result.Structs {
 		visited := make(map[string]bool)
-		p.resolveNestedStructsRecursive(s, visited)
+		p.resolveNestedStructsRecursive(s, visited, imports)
 	}
 
 	// Second pass: find handlers
@@ -409,7 +433,7 @@ func (p *Parser) typeToString(expr ast.Expr) string {
 	case *ast.MapType:
 		return "map[" + p.typeToString(e.Key) + "]" + p.typeToString(e.Value)
 	case *ast.InterfaceType:
-		return "interface{}"
+		return "any"
 	default:
 		return ""
 	}
@@ -439,7 +463,7 @@ func (p *Parser) exprToString(expr ast.Expr) string {
 
 // resolveNestedStructsRecursive resolves nested struct types for all fields recursively
 // with circular reference detection
-func (p *Parser) resolveNestedStructsRecursive(s *Struct, visited map[string]bool) {
+func (p *Parser) resolveNestedStructsRecursive(s *Struct, visited map[string]bool, imports map[string]string) {
 	// Prevent infinite recursion by tracking visited structs
 	if visited[s.Name] {
 		return
@@ -463,7 +487,19 @@ func (p *Parser) resolveNestedStructsRecursive(s *Struct, visited map[string]boo
 			typeName = field.SliceType
 		}
 
-		// Check if this type is a known struct
+		// Extract package path from type if it contains a dot
+		pkgAlias := ""
+		structName := typeName
+		if strings.Contains(typeName, ".") {
+			parts := strings.Split(typeName, ".")
+			if len(parts) == 2 {
+				pkgAlias = parts[0]
+				structName = parts[1]
+				field.PackagePath = pkgAlias
+			}
+		}
+
+		// Try to resolve from cache first
 		if nestedStruct, ok := p.structs[typeName]; ok {
 			// Check for circular reference before copying
 			if visited[typeName] {
@@ -486,17 +522,112 @@ func (p *Parser) resolveNestedStructsRecursive(s *Struct, visited map[string]boo
 			copy(field.NestedStruct.Fields, nestedStruct.Fields)
 
 			// Recursively resolve nested structs within this struct
-			p.resolveNestedStructsRecursive(field.NestedStruct, visited)
+			p.resolveNestedStructsRecursive(field.NestedStruct, visited, imports)
+			continue
 		}
 
-		// Extract package path from type if it contains a dot
-		if strings.Contains(typeName, ".") {
-			parts := strings.Split(typeName, ".")
-			if len(parts) == 2 {
-				field.PackagePath = parts[0]
+		// If not in cache and has package prefix, try to load from external package
+		if pkgAlias != "" {
+			if importPath, ok := imports[pkgAlias]; ok {
+				externalStruct, externalImports := p.loadExternalStruct(importPath, structName)
+				if externalStruct != nil {
+					// Cache it with full name for future lookups
+					p.structs[typeName] = externalStruct
+
+					// Check for circular reference
+					if visited[typeName] {
+						field.NestedStruct = &Struct{
+							Name:  externalStruct.Name,
+							IsDTO: externalStruct.IsDTO,
+						}
+						continue
+					}
+
+					// Make a copy
+					field.NestedStruct = &Struct{
+						Name:   externalStruct.Name,
+						Fields: make([]Field, len(externalStruct.Fields)),
+						IsDTO:  externalStruct.IsDTO,
+					}
+					copy(field.NestedStruct.Fields, externalStruct.Fields)
+
+					// Recursively resolve nested structs within the external struct
+					// Use the imports from the external file
+					p.resolveNestedStructsRecursive(field.NestedStruct, visited, externalImports)
+				}
 			}
 		}
 	}
+}
+
+// loadExternalStruct loads a struct definition from an external package
+func (p *Parser) loadExternalStruct(importPath, structName string) (*Struct, map[string]string) {
+	// Check if package is already loaded
+	if pkg, ok := p.loadedPkgs[importPath]; ok {
+		return p.findStructInPackage(pkg, structName)
+	}
+
+	// Load the package
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes,
+		Dir:  p.currentDir,
+	}
+
+	pkgs, err := packages.Load(cfg, importPath)
+	if err != nil || len(pkgs) == 0 {
+		return nil, nil
+	}
+
+	pkg := pkgs[0]
+	if len(pkg.Errors) > 0 {
+		return nil, nil
+	}
+
+	// Cache the package
+	p.loadedPkgs[importPath] = pkg
+
+	return p.findStructInPackage(pkg, structName)
+}
+
+// findStructInPackage searches for a struct definition in a loaded package
+// Returns the struct and the imports from the file where it was found
+func (p *Parser) findStructInPackage(pkg *packages.Package, structName string) (*Struct, map[string]string) {
+	for _, file := range pkg.Syntax {
+		// Collect imports from this file
+		fileImports := make(map[string]string)
+		for _, imp := range file.Imports {
+			path := strings.Trim(imp.Path.Value, `"`)
+			alias := filepath.Base(path)
+			if imp.Name != nil {
+				alias = imp.Name.Name
+			}
+			fileImports[alias] = path
+		}
+
+		for _, decl := range file.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok {
+				continue
+			}
+
+			for _, spec := range genDecl.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok || typeSpec.Name.Name != structName {
+					continue
+				}
+
+				structType, ok := typeSpec.Type.(*ast.StructType)
+				if !ok {
+					continue
+				}
+
+				// Found the struct, parse it and return with its file's imports
+				return p.parseStruct(structName, structType, typeSpec), fileImports
+			}
+		}
+	}
+
+	return nil, nil
 }
 
 // hasApikitComment checks if a function has the apikit:handler comment

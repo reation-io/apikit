@@ -65,7 +65,7 @@ func RegisterValidation(f func(v *validator.Validate, translator ut.Translator))
 }
 
 // Struct validates a struct without context
-func Struct(s interface{}) error {
+func Struct(s any) error {
 	if err := validate.Struct(s); err != nil {
 		return FormatError(err)
 	}
@@ -73,7 +73,7 @@ func Struct(s interface{}) error {
 }
 
 // StructCtx validates a struct with context
-func StructCtx(ctx context.Context, s interface{}) error {
+func StructCtx(ctx context.Context, s any) error {
 	if err := validate.StructCtx(ctx, s); err != nil {
 		return FormatError(err)
 	}
@@ -81,7 +81,7 @@ func StructCtx(ctx context.Context, s interface{}) error {
 }
 
 // StructExceptCtx validates a struct with context, omitting specified fields
-func StructExceptCtx(ctx context.Context, s interface{}, omitField ...string) error {
+func StructExceptCtx(ctx context.Context, s any, omitField ...string) error {
 	if err := validate.StructExceptCtx(ctx, s, omitField...); err != nil {
 		return FormatError(err)
 	}
