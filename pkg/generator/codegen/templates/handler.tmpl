@@ -42,13 +42,9 @@ func {{ .WrapperName }}(handler func(context.Context, {{ .ParamType }}{{ if .Has
 
 		// Call the handler
 		response, err := handler(r.Context(), payload{{ if .HasResponseWriter }}, w{{ end }}{{ if .HasRequest }}, r{{ end }})
-		if err != nil {
-			apikit.HandleError(w, err)
-			return
-		}
 
-		// Write response
-		apikit.WriteJSON(w, response)
+		// Handle response (supports HttpResponse, errors, and traditional responses)
+		apikit.HandleResponse(w, response, err)
 	}
 }
 

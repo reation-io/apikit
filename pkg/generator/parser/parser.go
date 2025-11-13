@@ -785,6 +785,8 @@ func hasApikitComment(fn *ast.FuncDecl) bool {
 //   - "// in:query" -> ("query", "")
 //   - "// in:path userId" -> ("path", "userId")
 //   - "// in:header X-API-Key" -> ("header", "X-API-Key")
+//   - "// in:header 'User-Agent'" -> ("header", "User-Agent")
+//   - "// in:header 'X-Custom Header'" -> ("header", "X-Custom Header")
 //   - "// in: body" -> ("body", "")
 func extractInComment(comment string) (string, string) {
 	// Remove comment markers
@@ -798,6 +800,29 @@ func extractInComment(comment string) (string, string) {
 		value := strings.TrimPrefix(comment, "in:")
 		value = strings.TrimSpace(value)
 
+		// Check if value contains quoted string (single quotes)
+		// Example: "header 'User-Agent'" or "header 'X-Custom Header'"
+		if strings.Contains(value, "'") {
+			// Find the first space (separates source from quoted name)
+			spaceIdx := strings.Index(value, " ")
+			if spaceIdx == -1 {
+				// No space, just return the source
+				return strings.Trim(value, "'"), ""
+			}
+
+			source := value[:spaceIdx]
+			rest := strings.TrimSpace(value[spaceIdx+1:])
+
+			// Extract quoted name
+			if strings.HasPrefix(rest, "'") && strings.HasSuffix(rest, "'") {
+				name := strings.Trim(rest, "'")
+				return source, name
+			}
+
+			// If quotes are not properly closed, fall back to regular parsing
+		}
+
+		// Regular parsing (no quotes)
 		// Split by space to get source and optional name
 		parts := strings.Fields(value)
 		if len(parts) == 0 {

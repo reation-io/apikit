@@ -153,3 +153,62 @@ func TestGenerate_WithPathParameter(t *testing.T) {
 		t.Error("expected generated code to contain PathValue for path parameter")
 	}
 }
+
+func TestGenerate_UsesHandleResponse(t *testing.T) {
+	gen, err := New()
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	reqStruct := &parser.Struct{
+		Name: "CreateUserRequest",
+		Fields: []parser.Field{
+			{
+				Name:      "Name",
+				Type:      "string",
+				StructTag: `json:"name"`,
+			},
+		},
+	}
+
+	handler := parser.Handler{
+		Name:       "CreateUser",
+		Package:    "test",
+		ParamType:  "CreateUserRequest",
+		ReturnType: "CreateUserResponse",
+		Struct:     reqStruct,
+	}
+
+	result := &parser.ParseResult{
+		Handlers: []parser.Handler{handler},
+		Structs: map[string]*parser.Struct{
+			"CreateUserRequest": reqStruct,
+		},
+		Source: parser.Source{
+			Package: "test",
+		},
+	}
+
+	code, err := gen.Generate(result)
+	if err != nil {
+		t.Fatalf("Generate() failed: %v", err)
+	}
+
+	codeStr := string(code)
+
+	// Should use HandleResponse instead of separate HandleError and WriteJSON
+	if !strings.Contains(codeStr, "apikit.HandleResponse(w, response, err)") {
+		t.Error("expected generated code to use apikit.HandleResponse")
+	}
+
+	// Should NOT contain the old pattern
+	if strings.Contains(codeStr, "apikit.WriteJSON(w, response)") {
+		t.Error("expected generated code to NOT use apikit.WriteJSON directly")
+	}
+
+	// Should NOT contain the old error handling pattern
+	oldPattern := "if err != nil {\n\t\tapikit.HandleError(w, err)\n\t\treturn\n\t}\n\n\t// Write response"
+	if strings.Contains(codeStr, oldPattern) {
+		t.Error("expected generated code to NOT use old error handling pattern")
+	}
+}

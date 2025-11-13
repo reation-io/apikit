@@ -357,3 +357,117 @@ func GetUser(ctx context.Context, req GetUserRequest) (GetUserResponse, error) {
 		t.Errorf("expected InCommentName 'userId', got %q", userIDField.InCommentName)
 	}
 }
+
+func TestExtractInComment(t *testing.T) {
+	tests := []struct {
+		name           string
+		comment        string
+		expectedSource string
+		expectedName   string
+	}{
+		{
+			name:           "query without name",
+			comment:        "// in:query",
+			expectedSource: "query",
+			expectedName:   "",
+		},
+		{
+			name:           "path with name",
+			comment:        "// in:path userId",
+			expectedSource: "path",
+			expectedName:   "userId",
+		},
+		{
+			name:           "header without quotes",
+			comment:        "// in:header X-API-Key",
+			expectedSource: "header",
+			expectedName:   "X-API-Key",
+		},
+		{
+			name:           "header with single quotes",
+			comment:        "// in:header 'User-Agent'",
+			expectedSource: "header",
+			expectedName:   "User-Agent",
+		},
+		{
+			name:           "header with single quotes and spaces",
+			comment:        "// in:header 'X-Custom Header'",
+			expectedSource: "header",
+			expectedName:   "X-Custom Header",
+		},
+		{
+			name:           "header with single quotes and dashes",
+			comment:        "// in:header 'X-Request-ID'",
+			expectedSource: "header",
+			expectedName:   "X-Request-ID",
+		},
+		{
+			name:           "body",
+			comment:        "// in:body",
+			expectedSource: "body",
+			expectedName:   "",
+		},
+		{
+			name:           "body with space",
+			comment:        "// in: body",
+			expectedSource: "body",
+			expectedName:   "",
+		},
+		{
+			name:           "cookie with name",
+			comment:        "// in:cookie sessionId",
+			expectedSource: "cookie",
+			expectedName:   "sessionId",
+		},
+		{
+			name:           "cookie with quoted name",
+			comment:        "// in:cookie 'session-id'",
+			expectedSource: "cookie",
+			expectedName:   "session-id",
+		},
+		{
+			name:           "no in comment",
+			comment:        "// some other comment",
+			expectedSource: "",
+			expectedName:   "",
+		},
+		{
+			name:           "empty comment",
+			comment:        "//",
+			expectedSource: "",
+			expectedName:   "",
+		},
+		{
+			name:           "block comment",
+			comment:        "/* in:query */",
+			expectedSource: "query",
+			expectedName:   "",
+		},
+		{
+			name:           "block comment with name",
+			comment:        "/* in:path userId */",
+			expectedSource: "path",
+			expectedName:   "userId",
+		},
+		{
+			name:           "block comment with quoted name",
+			comment:        "/* in:header 'Content-Type' */",
+			expectedSource: "header",
+			expectedName:   "Content-Type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, name := extractInComment(tt.comment)
+
+			if source != tt.expectedSource {
+				t.Errorf("expected source %q, got %q", tt.expectedSource, source)
+			}
+
+			if name != tt.expectedName {
+				t.Errorf("expected name %q, got %q", tt.expectedName, name)
+			}
+		})
+	}
+}

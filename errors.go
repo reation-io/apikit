@@ -120,6 +120,9 @@ var (
 	// ErrInternalServer is a generic internal server error
 	ErrInternalServer = InternalError("internal server error")
 
+	// ErrSomethingWentWrong is a generic internal server error
+	ErrSomethingWentWrong = InternalError("something went wrong")
+
 	// ErrNotImplemented indicates the feature is not implemented
 	ErrNotImplemented = NotImplemented("not implemented")
 

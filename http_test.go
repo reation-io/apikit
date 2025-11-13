@@ -75,7 +75,7 @@ func TestWriteJSONWithStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			WriteJSONWithStatus(w, tt.status, tt.data)
+			writeJSONWithStatus(w, tt.status, tt.data)
 
 			if w.Code != tt.status {
 				t.Errorf("expected status %d, got %d", tt.status, w.Code)
@@ -113,7 +113,7 @@ func TestWriteError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			WriteError(w, tt.err, tt.status)
+			writeError(w, tt.err, tt.status)
 
 			if w.Code != tt.status {
 				t.Errorf("expected status %d, got %d", tt.status, w.Code)
@@ -263,10 +263,209 @@ func TestWriteJSONWithStatus_EncodingError(t *testing.T) {
 	w := httptest.NewRecorder()
 	invalidData := make(chan int)
 
-	WriteJSONWithStatus(w, http.StatusCreated, invalidData)
+	writeJSONWithStatus(w, http.StatusCreated, invalidData)
 
 	// Status should already be written
 	if w.Code != http.StatusCreated {
 		t.Errorf("expected status 201, got %d", w.Code)
+	}
+}
+
+func TestHttpResponse_NoBody(t *testing.T) {
+	w := httptest.NewRecorder()
+	resp := NewHttpResponse(http.StatusNoContent, nil)
+
+	HandleResponse(w, resp, nil)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("Expected status %d, got %d", http.StatusNoContent, w.Code)
+	}
+
+	if w.Body.Len() > 0 {
+		t.Errorf("Expected empty body, got %s", w.Body.String())
+	}
+}
+
+func TestHttpResponse_WithJSONBody(t *testing.T) {
+	w := httptest.NewRecorder()
+	data := map[string]string{"message": "success"}
+	resp := NewHttpResponse(http.StatusOK, data)
+
+	HandleResponse(w, resp, nil)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("Expected Content-Type application/json, got %s", contentType)
+	}
+
+	var result map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if result["message"] != "success" {
+		t.Errorf("Expected message 'success', got '%s'", result["message"])
+	}
+}
+
+func TestHttpResponse_WithHeaders(t *testing.T) {
+	w := httptest.NewRecorder()
+	resp := NewHttpResponse(http.StatusCreated, map[string]string{"id": "123"}).
+		WithHeader("Location", "/api/resource/123").
+		WithHeader("X-Request-ID", "req-456")
+
+	HandleResponse(w, resp, nil)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Expected status %d, got %d", http.StatusCreated, w.Code)
+	}
+
+	location := w.Header().Get("Location")
+	if location != "/api/resource/123" {
+		t.Errorf("Expected Location header '/api/resource/123', got '%s'", location)
+	}
+
+	requestID := w.Header().Get("X-Request-ID")
+	if requestID != "req-456" {
+		t.Errorf("Expected X-Request-ID header 'req-456', got '%s'", requestID)
+	}
+}
+
+func TestHttpResponse_WithCustomContentType(t *testing.T) {
+	w := httptest.NewRecorder()
+	resp := NewHttpResponse(http.StatusOK, "Hello, World!").
+		WithContentType("text/plain")
+
+	HandleResponse(w, resp, nil)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "text/plain" {
+		t.Errorf("Expected Content-Type text/plain, got %s", contentType)
+	}
+
+	body := w.Body.String()
+	if body != "Hello, World!" {
+		t.Errorf("Expected body 'Hello, World!', got '%s'", body)
+	}
+}
+
+func TestHttpResponse_WithBinaryData(t *testing.T) {
+	w := httptest.NewRecorder()
+	data := []byte{0x89, 0x50, 0x4E, 0x47}
+	resp := NewHttpResponse(http.StatusOK, data).
+		WithContentType("image/png")
+
+	HandleResponse(w, resp, nil)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "image/png" {
+		t.Errorf("Expected Content-Type image/png, got %s", contentType)
+	}
+
+	if len(w.Body.Bytes()) != len(data) {
+		t.Errorf("Expected body length %d, got %d", len(data), len(w.Body.Bytes()))
+	}
+}
+
+func TestHttpResponse_WithMultipleHeaders(t *testing.T) {
+	w := httptest.NewRecorder()
+	headers := map[string]string{
+		"X-Total-Count": "100",
+		"X-Page":        "1",
+	}
+	resp := NewHttpResponse(http.StatusOK, []string{"item1", "item2"}).
+		WithHeaders(headers)
+
+	HandleResponse(w, resp, nil)
+
+	if w.Header().Get("X-Total-Count") != "100" {
+		t.Errorf("Expected X-Total-Count header '100', got '%s'", w.Header().Get("X-Total-Count"))
+	}
+
+	if w.Header().Get("X-Page") != "1" {
+		t.Errorf("Expected X-Page header '1', got '%s'", w.Header().Get("X-Page"))
+	}
+}
+
+func TestHttpResponse_ValueNotPointer(t *testing.T) {
+	w := httptest.NewRecorder()
+
+	// Test with HttpResponse value (not pointer)
+	resp := HttpResponse{
+		StatusCode:  http.StatusCreated,
+		Body:        map[string]string{"id": "123"},
+		ContentType: "application/json",
+	}
+
+	HandleResponse(w, resp, nil)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Expected status %d, got %d", http.StatusCreated, w.Code)
+	}
+
+	var result map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if result["id"] != "123" {
+		t.Errorf("Expected id '123', got '%s'", result["id"])
+	}
+}
+
+func TestHttpResponse_ValueWithHeaders(t *testing.T) {
+	w := httptest.NewRecorder()
+
+	// Test with HttpResponse value with headers
+	resp := HttpResponse{
+		StatusCode: http.StatusOK,
+		Body:       map[string]string{"status": "ok"},
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+		},
+		ContentType: "application/json",
+	}
+
+	HandleResponse(w, resp, nil)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	customHeader := w.Header().Get("X-Custom-Header")
+	if customHeader != "custom-value" {
+		t.Errorf("Expected X-Custom-Header 'custom-value', got '%s'", customHeader)
+	}
+}
+
+func TestHttpResponse_ValueNoBody(t *testing.T) {
+	w := httptest.NewRecorder()
+
+	// Test with HttpResponse value and no body
+	resp := HttpResponse{
+		StatusCode: http.StatusNoContent,
+		Body:       nil,
+	}
+
+	HandleResponse(w, resp, nil)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("Expected status %d, got %d", http.StatusNoContent, w.Code)
+	}
+
+	if w.Body.Len() > 0 {
+		t.Errorf("Expected empty body, got %s", w.Body.String())
 	}
 }
