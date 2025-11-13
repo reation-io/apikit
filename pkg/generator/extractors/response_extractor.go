@@ -1,6 +1,8 @@
 package extractors
 
 import (
+	"fmt"
+
 	"github.com/reation-io/apikit/pkg/generator/parser"
 )
 
@@ -24,6 +26,6 @@ func (e *ResponseExtractor) CanExtract(field *parser.Field) bool {
 }
 
 func (e *ResponseExtractor) GenerateCode(field *parser.Field, structName string) (string, []string) {
-	// http.ResponseWriter is passed directly to the handler, no extraction needed
-	return "", nil
+	// Assign http.ResponseWriter to the payload field
+	return fmt.Sprintf("payload.%s = w", field.Name), nil
 }

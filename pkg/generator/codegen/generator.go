@@ -176,8 +176,8 @@ func (g *Generator) generateExtractionCode(s *parser.Struct, importsMap map[stri
 			continue
 		}
 
-		// Skip special fields
-		if field.IsRawBody || field.IsResponseWriter || field.IsRequest {
+		// Skip RawBody field (handled separately in template)
+		if field.IsRawBody {
 			continue
 		}
 

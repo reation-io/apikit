@@ -22,6 +22,11 @@ func (e *BodyExtractor) Priority() int {
 }
 
 func (e *BodyExtractor) CanExtract(field *parser.Field) bool {
+	// Skip special fields - they have their own extractors
+	if field.IsRequest || field.IsResponseWriter || field.IsRawBody {
+		return false
+	}
+
 	// Body extraction is handled at the struct level, not field level
 	// This extractor is used to detect if we need body parsing
 	if field.IsBody {

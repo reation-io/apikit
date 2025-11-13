@@ -288,13 +288,17 @@ func (p *Parser) parseField(field *ast.Field) []Field {
 				name.Name == "Raw")
 
 			// http.ResponseWriter aliases: ResponseWriter, Response, Writer, Res, W
-			f.IsResponseWriter = (name.Name == "Response" ||
-				name.Name == "Res") &&
+			f.IsResponseWriter = (name.Name == "ResponseWriter" ||
+				name.Name == "Response" ||
+				name.Name == "Writer" ||
+				name.Name == "Res" ||
+				name.Name == "W") &&
 				fieldType == "http.ResponseWriter"
 
 			// *http.Request aliases: Request, Req, R
 			f.IsRequest = (name.Name == "Request" ||
-				name.Name == "Req") &&
+				name.Name == "Req" ||
+				name.Name == "R") &&
 				fieldType == "*http.Request"
 
 			// Store the complete struct tag
