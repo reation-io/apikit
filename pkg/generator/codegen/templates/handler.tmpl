@@ -78,7 +78,11 @@ func {{ .ParseFuncName }}(w http.ResponseWriter, r *http.Request, payload *{{ .P
 		{{- if .HasBody }}
 		// Parse JSON body into payload
 		if len(body) > 0 {
+			{{- if .BodyFieldName }}
+			if err := json.Unmarshal(body, &payload.{{ .BodyFieldName }}); err != nil {
+			{{- else }}
 			if err := json.Unmarshal(body, payload); err != nil {
+			{{- end }}
 				return fmt.Errorf("parsing JSON: %w", err)
 			}
 		}

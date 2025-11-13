@@ -53,6 +53,7 @@ type HandlerData struct {
 	HasExtractionCode bool
 	ExtractionCode    string
 	HasBody           bool
+	BodyFieldName     string
 	HasRawBody        bool
 	RawBodyFieldName  string
 	HasValidation     bool
@@ -137,8 +138,14 @@ func (g *Generator) prepareHandlerData(handler *parser.Handler, importsMap map[s
 	hd.HasExtractionCode = extractionCode != ""
 	hd.ExtractionCode = extractionCode
 
-	// Check if we need body parsing
+	// Check if we need body parsing and find the body field name
 	hd.HasBody = g.hasBodyFields(handler.Struct)
+	if hd.HasBody {
+		bodyField := g.findBodyField(handler.Struct)
+		if bodyField != "" {
+			hd.BodyFieldName = bodyField
+		}
+	}
 
 	// Check if there's a RawBody field
 	rawBodyField := g.findRawBodyField(handler.Struct)
@@ -226,6 +233,33 @@ func (g *Generator) hasBodyFields(s *parser.Struct) bool {
 		}
 	}
 	return false
+}
+
+// findBodyField searches for a body field in the struct
+// Returns the field name if found, empty string otherwise
+func (g *Generator) findBodyField(s *parser.Struct) string {
+	for _, field := range s.Fields {
+		// Check embedded structs recursively
+		if field.IsEmbedded && field.NestedStruct != nil {
+			if bodyField := g.findBodyField(field.NestedStruct); bodyField != "" {
+				return bodyField
+			}
+		}
+
+		// Check if this is a body field
+		if field.IsBody {
+			return field.Name
+		}
+
+		// Check if field has json:"body" tag
+		if field.StructTag != "" {
+			tag := reflect.StructTag(field.StructTag)
+			if jsonTag, ok := tag.Lookup("json"); ok && jsonTag == "body" {
+				return field.Name
+			}
+		}
+	}
+	return ""
 }
 
 // findRawBodyField searches for a RawBody field ([]byte) in the struct
