@@ -301,6 +301,10 @@ func (p *Parser) parseField(field *ast.Field) []Field {
 				name.Name == "R") &&
 				fieldType == "*http.Request"
 
+			// File upload fields: *multipart.FileHeader or []*multipart.FileHeader
+			f.IsFile = fieldType == "*multipart.FileHeader" ||
+				fieldType == "[]*multipart.FileHeader"
+
 			// Store the complete struct tag
 			if field.Tag != nil {
 				f.StructTag = strings.Trim(field.Tag.Value, "`")
