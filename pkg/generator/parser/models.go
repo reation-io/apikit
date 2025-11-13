@@ -74,6 +74,7 @@ type Field struct {
 	IsRawBody        bool // Field named RawBody with type []byte
 	IsResponseWriter bool // Field is http.ResponseWriter
 	IsRequest        bool // Field is *http.Request
+	IsFile           bool // Field is *multipart.FileHeader or []*multipart.FileHeader
 
 	// Nested struct information
 	NestedStruct *Struct // If this field is a struct type, contains its definition

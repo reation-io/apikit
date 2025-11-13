@@ -50,6 +50,13 @@ func {{ .WrapperName }}(handler func(context.Context, {{ .ParamType }}{{ if .Has
 
 // {{ .ParseFuncName }} parses the HTTP request into the payload struct
 func {{ .ParseFuncName }}(w http.ResponseWriter, r *http.Request, payload *{{ .ParamType }}) error {
+{{- if .HasMultipartForm }}
+	// Parse multipart form data
+	if err := r.ParseMultipartForm({{ .MaxMemory }}); err != nil {
+		return fmt.Errorf("parsing multipart form: %w", err)
+	}
+{{- end }}
+
 {{- if .HasExtractionCode }}
 	// Extract parameters
 {{ .ExtractionCode }}
