@@ -343,3 +343,256 @@ func (b *Builder) getJSONName(field *ast.Field) string {
 
 	return ""
 }
+
+// BuildMultiple scans files and builds multiple OpenAPI specifications based on Spec: tags
+// Returns a map of spec name to OpenAPI spec
+func (b *Builder) BuildMultiple() (map[string]*spec.OpenAPI, error) {
+	// First, build the complete spec with all routes
+	if _, err := b.Build(); err != nil {
+		return nil, err
+	}
+
+	// Distribute routes into multiple specs
+	return b.distributeRoutes(), nil
+}
+
+// distributeRoutes distributes routes from the main spec into multiple specs based on x-specs extension
+func (b *Builder) distributeRoutes() map[string]*spec.OpenAPI {
+	specs := make(map[string]*spec.OpenAPI)
+
+	// Initialize default spec
+	specs["default"] = b.createEmptySpec()
+
+	// Iterate through all paths and operations
+	for path, pathItem := range b.spec.Paths.PathItems {
+		// Check each HTTP method
+		operations := map[string]*spec.Operation{
+			"GET":     pathItem.Get,
+			"POST":    pathItem.Post,
+			"PUT":     pathItem.Put,
+			"DELETE":  pathItem.Delete,
+			"PATCH":   pathItem.Patch,
+			"OPTIONS": pathItem.Options,
+			"HEAD":    pathItem.Head,
+		}
+
+		for method, operation := range operations {
+			if operation == nil {
+				continue
+			}
+
+			// Get spec names from operation extensions
+			specNames := getSpecNamesFromOperation(operation)
+
+			if len(specNames) == 0 {
+				// No spec tag → goes to default
+				b.addOperationToSpec(specs["default"], path, method, operation)
+			} else {
+				// Add to each specified spec
+				for _, specName := range specNames {
+					if specs[specName] == nil {
+						specs[specName] = b.createEmptySpec()
+					}
+					b.addOperationToSpec(specs[specName], path, method, operation)
+				}
+			}
+		}
+	}
+
+	// Copy models to all specs (models are shared)
+	for specName, targetSpec := range specs {
+		if b.spec.Components != nil && b.spec.Components.Schemas != nil {
+			if targetSpec.Components == nil {
+				targetSpec.Components = &spec.Components{}
+			}
+			if targetSpec.Components.Schemas == nil {
+				targetSpec.Components.Schemas = make(map[string]*spec.Schema)
+			}
+			// Copy all schemas
+			for schemaName, schema := range b.spec.Components.Schemas {
+				targetSpec.Components.Schemas[schemaName] = schema
+			}
+		}
+
+		// Copy security schemes to all specs
+		if b.spec.Components != nil && b.spec.Components.SecuritySchemes != nil {
+			if targetSpec.Components == nil {
+				targetSpec.Components = &spec.Components{}
+			}
+			if targetSpec.Components.SecuritySchemes == nil {
+				targetSpec.Components.SecuritySchemes = make(map[string]*spec.SecurityScheme)
+			}
+			for schemeName, scheme := range b.spec.Components.SecuritySchemes {
+				targetSpec.Components.SecuritySchemes[schemeName] = scheme
+			}
+		}
+
+		// Apply meta-level spec filtering if Info has x-specs
+		if b.spec.Info != nil && b.spec.Info.Extensions != nil {
+			if metaSpecs, ok := b.spec.Info.Extensions["x-specs"].([]string); ok {
+				// Check if this spec should get the meta info
+				if !containsString(metaSpecs, specName) && specName != "default" {
+					// This spec shouldn't use this meta, create default meta
+					targetSpec.Info = &spec.Info{
+						Title:   "API",
+						Version: "1.0.0",
+					}
+				}
+			}
+		}
+	}
+
+	return specs
+}
+
+// createEmptySpec creates a new empty OpenAPI spec with default values
+func (b *Builder) createEmptySpec() *spec.OpenAPI {
+	newSpec := &spec.OpenAPI{
+		OpenAPI: "3.0.3",
+		Info:    &spec.Info{},
+		Paths: &spec.Paths{
+			PathItems: make(map[string]*spec.PathItem),
+		},
+	}
+
+	// Copy Info from main spec
+	if b.spec.Info != nil {
+		newSpec.Info.Title = b.spec.Info.Title
+		newSpec.Info.Version = b.spec.Info.Version
+		newSpec.Info.Description = b.spec.Info.Description
+		newSpec.Info.TermsOfService = b.spec.Info.TermsOfService
+		newSpec.Info.Contact = b.spec.Info.Contact
+		newSpec.Info.License = b.spec.Info.License
+	}
+
+	// Copy Servers from main spec
+	if b.spec.Servers != nil {
+		newSpec.Servers = make([]*spec.Server, len(b.spec.Servers))
+		copy(newSpec.Servers, b.spec.Servers)
+	}
+
+	return newSpec
+}
+
+// addOperationToSpec adds an operation to a spec at the given path and method
+func (b *Builder) addOperationToSpec(targetSpec *spec.OpenAPI, path, method string, operation *spec.Operation) {
+	// Ensure path exists
+	if targetSpec.Paths.PathItems[path] == nil {
+		targetSpec.Paths.PathItems[path] = &spec.PathItem{}
+	}
+
+	pathItem := targetSpec.Paths.PathItems[path]
+
+	// Clone the operation to avoid sharing references
+	clonedOp := cloneOperation(operation)
+
+	// Add operation to the appropriate method
+	switch strings.ToUpper(method) {
+	case "GET":
+		pathItem.Get = clonedOp
+	case "POST":
+		pathItem.Post = clonedOp
+	case "PUT":
+		pathItem.Put = clonedOp
+	case "DELETE":
+		pathItem.Delete = clonedOp
+	case "PATCH":
+		pathItem.Patch = clonedOp
+	case "OPTIONS":
+		pathItem.Options = clonedOp
+	case "HEAD":
+		pathItem.Head = clonedOp
+	}
+}
+
+// getSpecNamesFromOperation extracts spec names from operation's x-specs extension
+func getSpecNamesFromOperation(operation *spec.Operation) []string {
+	if operation.Extensions == nil {
+		return nil
+	}
+
+	specs, ok := operation.Extensions["x-specs"]
+	if !ok {
+		return nil
+	}
+
+	// Handle both []string and []interface{} (from JSON unmarshaling)
+	switch v := specs.(type) {
+	case []string:
+		return v
+	case []interface{}:
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+// cloneOperation creates a deep copy of an operation
+func cloneOperation(op *spec.Operation) *spec.Operation {
+	if op == nil {
+		return nil
+	}
+
+	cloned := &spec.Operation{
+		Tags:        make([]string, len(op.Tags)),
+		Summary:     op.Summary,
+		Description: op.Description,
+		OperationID: op.OperationID,
+		Deprecated:  op.Deprecated,
+	}
+
+	copy(cloned.Tags, op.Tags)
+
+	// Clone parameters
+	if op.Parameters != nil {
+		cloned.Parameters = make([]*spec.Parameter, len(op.Parameters))
+		copy(cloned.Parameters, op.Parameters)
+	}
+
+	// Clone request body
+	cloned.RequestBody = op.RequestBody
+
+	// Clone responses
+	if op.Responses != nil {
+		cloned.Responses = &spec.Responses{
+			StatusCodeResponses: make(map[string]*spec.Response),
+			Default:             op.Responses.Default,
+		}
+		for code, resp := range op.Responses.StatusCodeResponses {
+			cloned.Responses.StatusCodeResponses[code] = resp
+		}
+	}
+
+	// Clone security
+	if op.Security != nil {
+		cloned.Security = make([]spec.SecurityRequirement, len(op.Security))
+		copy(cloned.Security, op.Security)
+	}
+
+	// Clone servers
+	if op.Servers != nil {
+		cloned.Servers = make([]*spec.Server, len(op.Servers))
+		copy(cloned.Servers, op.Servers)
+	}
+
+	// Don't copy Extensions (we don't want x-specs in the output)
+	// cloned.Extensions = op.Extensions
+
+	return cloned
+}
+
+// containsString checks if a string slice contains a specific string
+func containsString(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}

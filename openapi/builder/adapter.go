@@ -46,6 +46,145 @@ func ExtractFromGeneric(results []*coreast.ParseResult) (*spec.OpenAPI, error) {
 	return openapi, nil
 }
 
+// ExtractMultipleFromGeneric extracts multiple OpenAPI specifications from generic parse results
+// based on Spec: tags in swagger:meta and swagger:route directives
+// Returns a map of spec name to OpenAPI specification
+func ExtractMultipleFromGeneric(results []*coreast.ParseResult) (map[string]*spec.OpenAPI, error) {
+	specs := make(map[string]*spec.OpenAPI)
+
+	// Initialize default spec
+	specs["default"] = &spec.OpenAPI{
+		OpenAPI: "3.0.3",
+		Info: &spec.Info{
+			Title:   "API",
+			Version: "1.0.0",
+		},
+		Paths: &spec.Paths{
+			PathItems: make(map[string]*spec.PathItem),
+		},
+	}
+
+	// First pass: collect all meta blocks and their spec tags
+	metaBySpec := make(map[string][]*coreast.Struct)
+
+	for _, result := range results {
+		for _, s := range result.Structs {
+			if !hasDirective(s.Doc, "swagger:meta") {
+				continue
+			}
+
+			// Parse to get spec names
+			tempInfo := &spec.Info{}
+			if err := parsers.GlobalRegistry().Parse("swagger:meta", s.Doc, tempInfo, parsers.ContextMeta); err != nil {
+				if !isInvalidTargetError(err) {
+					return nil, err
+				}
+			}
+
+			// Get spec names from extensions
+			var specNames []string
+			if tempInfo.Extensions != nil {
+				if specs, ok := tempInfo.Extensions["x-specs"].([]string); ok {
+					specNames = specs
+				}
+			}
+
+			// If no spec tag, apply to default
+			if len(specNames) == 0 {
+				metaBySpec["default"] = append(metaBySpec["default"], s)
+			} else {
+				for _, specName := range specNames {
+					metaBySpec[specName] = append(metaBySpec[specName], s)
+				}
+			}
+		}
+	}
+
+	// Create specs for each meta block
+	for specName, metaStructs := range metaBySpec {
+		if specs[specName] == nil {
+			specs[specName] = &spec.OpenAPI{
+				OpenAPI: "3.0.3",
+				Info: &spec.Info{
+					Title:   "API",
+					Version: "1.0.0",
+				},
+				Paths: &spec.Paths{
+					PathItems: make(map[string]*spec.PathItem),
+				},
+			}
+		}
+
+		// Apply meta from all matching meta blocks
+		for _, metaStruct := range metaStructs {
+			if err := parsers.GlobalRegistry().Parse("swagger:meta", metaStruct.Doc, specs[specName].Info, parsers.ContextMeta); err != nil {
+				if !isInvalidTargetError(err) {
+					return nil, err
+				}
+			}
+
+			if err := parsers.GlobalRegistry().Parse("swagger:meta", metaStruct.Doc, specs[specName], parsers.ContextMeta); err != nil {
+				if !isInvalidTargetError(err) {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	// Second pass: extract routes and distribute them
+	for _, result := range results {
+		if err := extractRoutesMulti(result, specs); err != nil {
+			return nil, err
+		}
+	}
+
+	// Third pass: extract models (shared across all specs)
+	allModels := make(map[string]*spec.Schema)
+	for _, result := range results {
+		for _, s := range result.Structs {
+			if !hasDirective(s.Doc, "swagger:model") {
+				continue
+			}
+
+			schema := convertStructToSchema(s)
+
+			// Parse field tags
+			for _, field := range s.Fields {
+				if field.Doc != nil || field.Comment != nil {
+					fieldSchema := schema.Properties[getJSONName(field)]
+					if fieldSchema != nil {
+						if field.Doc != nil {
+							parsers.GlobalRegistry().Parse("swagger:model", field.Doc, fieldSchema, parsers.ContextField)
+						}
+						if field.Comment != nil {
+							parsers.GlobalRegistry().Parse("swagger:model", field.Comment, fieldSchema, parsers.ContextField)
+						}
+					}
+				}
+			}
+
+			allModels[s.Name] = schema
+		}
+	}
+
+	// Add models to all specs
+	for _, openapi := range specs {
+		if len(allModels) > 0 {
+			if openapi.Components == nil {
+				openapi.Components = &spec.Components{}
+			}
+			if openapi.Components.Schemas == nil {
+				openapi.Components.Schemas = make(map[string]*spec.Schema)
+			}
+			for name, schema := range allModels {
+				openapi.Components.Schemas[name] = schema
+			}
+		}
+	}
+
+	return specs, nil
+}
+
 // extractMeta extracts swagger:meta information
 func extractMeta(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
 	for _, s := range result.Structs {
@@ -125,6 +264,150 @@ func extractRoutes(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
 	}
 
 	return nil
+}
+
+// extractRoutesMulti extracts swagger:route information and distributes to multiple specs
+func extractRoutesMulti(result *coreast.ParseResult, specs map[string]*spec.OpenAPI) error {
+	for _, s := range result.Structs {
+		if !hasDirective(s.Doc, "swagger:route") {
+			continue
+		}
+
+		// Parse the route line: swagger:route METHOD PATH TAG OPERATION_ID
+		routeInfo, err := parseRouteLine(s.Doc)
+		if err != nil {
+			return err
+		}
+
+		// Create operation
+		operation := &spec.Operation{
+			OperationID: routeInfo.OperationID,
+			Tags:        []string{routeInfo.Tag},
+			Responses: &spec.Responses{
+				StatusCodeResponses: make(map[string]*spec.Response),
+			},
+		}
+
+		// Parse operation tags
+		if err := parsers.GlobalRegistry().Parse("swagger:route", s.Doc, operation, parsers.ContextRoute); err != nil {
+			if !isInvalidTargetError(err) {
+				return err
+			}
+		}
+
+		// Get spec names from operation extensions
+		var specNames []string
+		if operation.Extensions != nil {
+			if specs, ok := operation.Extensions["x-specs"].([]string); ok {
+				specNames = specs
+			}
+		}
+
+		// If no spec tag, add to default
+		if len(specNames) == 0 {
+			specNames = []string{"default"}
+		}
+
+		// Add operation to each specified spec
+		for _, specName := range specNames {
+			// Ensure spec exists
+			if specs[specName] == nil {
+				specs[specName] = &spec.OpenAPI{
+					OpenAPI: "3.0.3",
+					Info: &spec.Info{
+						Title:   "API",
+						Version: "1.0.0",
+					},
+					Paths: &spec.Paths{
+						PathItems: make(map[string]*spec.PathItem),
+					},
+				}
+			}
+
+			targetSpec := specs[specName]
+
+			// Clone operation to avoid sharing references
+			clonedOp := cloneOperationForAdapter(operation)
+
+			// Add operation to path
+			if targetSpec.Paths.PathItems[routeInfo.Path] == nil {
+				targetSpec.Paths.PathItems[routeInfo.Path] = &spec.PathItem{}
+			}
+
+			pathItem := targetSpec.Paths.PathItems[routeInfo.Path]
+			switch strings.ToUpper(routeInfo.Method) {
+			case "GET":
+				pathItem.Get = clonedOp
+			case "POST":
+				pathItem.Post = clonedOp
+			case "PUT":
+				pathItem.Put = clonedOp
+			case "DELETE":
+				pathItem.Delete = clonedOp
+			case "PATCH":
+				pathItem.Patch = clonedOp
+			case "OPTIONS":
+				pathItem.Options = clonedOp
+			case "HEAD":
+				pathItem.Head = clonedOp
+			}
+		}
+	}
+
+	return nil
+}
+
+// cloneOperationForAdapter creates a copy of an operation (without x-specs extension)
+func cloneOperationForAdapter(op *spec.Operation) *spec.Operation {
+	if op == nil {
+		return nil
+	}
+
+	cloned := &spec.Operation{
+		Tags:        make([]string, len(op.Tags)),
+		Summary:     op.Summary,
+		Description: op.Description,
+		OperationID: op.OperationID,
+		Deprecated:  op.Deprecated,
+	}
+
+	copy(cloned.Tags, op.Tags)
+
+	// Clone parameters
+	if op.Parameters != nil {
+		cloned.Parameters = make([]*spec.Parameter, len(op.Parameters))
+		copy(cloned.Parameters, op.Parameters)
+	}
+
+	// Clone request body
+	cloned.RequestBody = op.RequestBody
+
+	// Clone responses
+	if op.Responses != nil {
+		cloned.Responses = &spec.Responses{
+			StatusCodeResponses: make(map[string]*spec.Response),
+			Default:             op.Responses.Default,
+		}
+		for code, resp := range op.Responses.StatusCodeResponses {
+			cloned.Responses.StatusCodeResponses[code] = resp
+		}
+	}
+
+	// Clone security
+	if op.Security != nil {
+		cloned.Security = make([]spec.SecurityRequirement, len(op.Security))
+		copy(cloned.Security, op.Security)
+	}
+
+	// Clone servers
+	if op.Servers != nil {
+		cloned.Servers = make([]*spec.Server, len(op.Servers))
+		copy(cloned.Servers, op.Servers)
+	}
+
+	// Don't copy Extensions (we don't want x-specs in the output)
+
+	return cloned
 }
 
 // extractModels extracts swagger:model information
