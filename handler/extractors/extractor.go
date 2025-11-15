@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/reation-io/apikit/pkg/generator/parser"
-	"github.com/reation-io/apikit/pkg/generator/types"
+	"github.com/reation-io/apikit/handler/parser"
+	"github.com/reation-io/apikit/handler/types"
 )
 
 // Extractor defines how to extract a parameter from an HTTP request

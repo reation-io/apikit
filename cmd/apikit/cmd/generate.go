@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/reation-io/apikit/pkg/generator/checksum"
-	"github.com/reation-io/apikit/pkg/generator/codegen"
-	_ "github.com/reation-io/apikit/pkg/generator/extractors"
-	"github.com/reation-io/apikit/pkg/generator/parser"
+	"github.com/reation-io/apikit/handler/checksum"
+	"github.com/reation-io/apikit/handler/codegen"
+	_ "github.com/reation-io/apikit/handler/extractors"
+	"github.com/reation-io/apikit/handler/parser"
 	"github.com/spf13/cobra"
 )
 

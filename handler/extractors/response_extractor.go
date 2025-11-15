@@ -3,7 +3,7 @@ package extractors
 import (
 	"fmt"
 
-	"github.com/reation-io/apikit/pkg/generator/parser"
+	"github.com/reation-io/apikit/handler/parser"
 )
 
 func init() {

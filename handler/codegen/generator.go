@@ -11,8 +11,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/reation-io/apikit/pkg/generator/extractors"
-	"github.com/reation-io/apikit/pkg/generator/parser"
+	"github.com/reation-io/apikit/handler/extractors"
+	"github.com/reation-io/apikit/handler/parser"
 	"golang.org/x/tools/imports"
 )
 

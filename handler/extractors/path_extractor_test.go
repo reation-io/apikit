@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reation-io/apikit/pkg/generator/parser"
+	"github.com/reation-io/apikit/handler/parser"
 )
 
 func TestPathExtractor_Name(t *testing.T) {
