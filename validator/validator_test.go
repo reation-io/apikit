@@ -27,7 +27,7 @@ func TestValidate(t *testing.T) {
 	}
 
 	// Verify it's a validator.Validate instance
-	if _, ok := interface{}(v).(*validator.Validate); !ok {
+	if _, ok := any(v).(*validator.Validate); !ok {
 		t.Error("expected *validator.Validate type")
 	}
 }
