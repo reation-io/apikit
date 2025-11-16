@@ -301,9 +301,20 @@ func (p *Parser) parseField(field *ast.Field) []Field {
 				name.Name == "R") &&
 				fieldType == "*http.Request"
 
+			// File upload fields: *multipart.FileHeader or []*multipart.FileHeader
+			f.IsFile = fieldType == "*multipart.FileHeader" ||
+				fieldType == "[]*multipart.FileHeader"
+
 			// Store the complete struct tag
 			if field.Tag != nil {
 				f.StructTag = strings.Trim(field.Tag.Value, "`")
+			}
+
+			// Check if this is an inline struct type
+			if structType, ok := field.Type.(*ast.StructType); ok {
+				// Parse the inline struct
+				inlineStruct := p.parseStruct(name.Name+"_inline", structType, nil)
+				f.NestedStruct = inlineStruct
 			}
 
 			fields = append(fields, f)
