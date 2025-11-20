@@ -15,7 +15,7 @@ func init() {
 type PathExtractor struct{}
 
 func (e *PathExtractor) Name() string {
-	return "path"
+	return parser.SourcePath
 }
 
 func (e *PathExtractor) Priority() int {
@@ -26,16 +26,16 @@ func (e *PathExtractor) CanExtract(field *parser.Field) bool {
 	// Check if field has path tag
 	if field.StructTag != "" {
 		tag := reflect.StructTag(field.StructTag)
-		if _, ok := tag.Lookup("path"); ok {
+		if _, ok := tag.Lookup(parser.TagPath); ok {
 			return true
 		}
 	}
 	// Check if field is marked with // in:path comment
-	return field.InComment == "path"
+	return field.InComment == parser.SourcePath
 }
 
 func (e *PathExtractor) GenerateCode(field *parser.Field, structName string) (string, []string) {
-	paramName := GetParameterName(field, "path")
+	paramName := GetParameterName(field, parser.TagPath)
 	fieldName := field.Name
 	typeName := GetBaseType(field)
 

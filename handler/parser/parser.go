@@ -284,26 +284,24 @@ func (p *Parser) parseField(field *ast.Field) []Field {
 
 			// Check for special field types
 			// More flexible RawBody detection: any []byte field with "body" in the name (case-insensitive)
-			f.IsRawBody = fieldType == "[]byte" && (name.Name == "RawBody" ||
-				name.Name == "Raw")
+			f.IsRawBody = fieldType == "[]byte" && (name.Name == FieldNameRawBody ||
+				name.Name == FieldNameRaw)
 
-			// http.ResponseWriter aliases: ResponseWriter, Response, Writer, Res, W
-			f.IsResponseWriter = (name.Name == "ResponseWriter" ||
-				name.Name == "Response" ||
-				name.Name == "Writer" ||
-				name.Name == "Res" ||
-				name.Name == "W") &&
+			// http.ResponseWriter aliases: ResponseWriter, Response, Writer, Res
+			f.IsResponseWriter = (name.Name == FieldNameResponseWriter ||
+				name.Name == FieldNameResponse ||
+				name.Name == FieldNameWriter ||
+				name.Name == FieldNameRes) &&
 				fieldType == "http.ResponseWriter"
 
-			// *http.Request aliases: Request, Req, R
-			f.IsRequest = (name.Name == "Request" ||
-				name.Name == "Req" ||
-				name.Name == "R") &&
+			// *http.Request aliases: Request, Req
+			f.IsRequest = (name.Name == FieldNameRequest ||
+				name.Name == FieldNameReq) &&
 				fieldType == "*http.Request"
 
 			// File upload fields: *multipart.FileHeader or []*multipart.FileHeader
-			f.IsFile = fieldType == "*multipart.FileHeader" ||
-				fieldType == "[]*multipart.FileHeader"
+			f.IsFile = fieldType == TypeFileHeader ||
+				fieldType == TypeFileHeaderSlice
 
 			// Store the complete struct tag
 			if field.Tag != nil {
@@ -782,7 +780,7 @@ func hasApikitComment(fn *ast.FuncDecl) bool {
 	}
 
 	for _, comment := range fn.Doc.List {
-		if strings.Contains(comment.Text, "apikit:handler") {
+		if strings.Contains(comment.Text, DirectiveHandler) {
 			return true
 		}
 	}

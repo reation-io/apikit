@@ -16,7 +16,7 @@ func init() {
 type FormExtractor struct{}
 
 func (e *FormExtractor) Name() string {
-	return "form"
+	return parser.SourceForm
 }
 
 func (e *FormExtractor) Priority() int {
@@ -32,13 +32,13 @@ func (e *FormExtractor) CanExtract(field *parser.Field) bool {
 	// Check if field has form tag
 	if field.StructTag != "" {
 		tag := reflect.StructTag(field.StructTag)
-		if _, ok := tag.Lookup("form"); ok {
+		if _, ok := tag.Lookup(parser.TagForm); ok {
 			return true
 		}
 	}
 
 	// Check if field is marked with // in:form comment
-	return field.InComment == "form"
+	return field.InComment == parser.SourceForm
 }
 
 func (e *FormExtractor) GenerateCode(field *parser.Field, structName string) (string, []string) {
@@ -47,12 +47,12 @@ func (e *FormExtractor) GenerateCode(field *parser.Field, structName string) (st
 
 	// Handle nested structs marked with // in:form
 	// These should have their fields extracted individually
-	if field.NestedStruct != nil && field.InComment == "form" {
+	if field.NestedStruct != nil && field.InComment == parser.SourceForm {
 		return e.generateNestedStructCode(field, &imports)
 	}
 
 	// Get the form field name from tag or use field name
-	formName := GetParameterName(field, "form")
+	formName := GetParameterName(field, parser.TagForm)
 
 	// Handle file uploads
 	if field.IsFile {
@@ -95,14 +95,14 @@ func (e *FormExtractor) generateNestedStructCode(field *parser.Field, imports *[
 		hasFormTag := false
 		if nestedField.StructTag != "" {
 			tag := reflect.StructTag(nestedField.StructTag)
-			if _, ok := tag.Lookup("form"); ok {
+			if _, ok := tag.Lookup(parser.TagForm); ok {
 				hasFormTag = true
 			}
 		}
 
 		// Extract if it has form tag or // in:form comment
-		if hasFormTag || nestedField.InComment == "form" {
-			formName := GetParameterName(&nestedField, "form")
+		if hasFormTag || nestedField.InComment == parser.SourceForm {
+			formName := GetParameterName(&nestedField, parser.TagForm)
 			fieldPath := fmt.Sprintf("%s.%s", field.Name, nestedField.Name)
 
 			// Handle file uploads

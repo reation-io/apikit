@@ -15,7 +15,7 @@ func init() {
 type HeaderExtractor struct{}
 
 func (e *HeaderExtractor) Name() string {
-	return "header"
+	return parser.SourceHeader
 }
 
 func (e *HeaderExtractor) Priority() int {
@@ -26,16 +26,16 @@ func (e *HeaderExtractor) CanExtract(field *parser.Field) bool {
 	// Check if field has header tag
 	if field.StructTag != "" {
 		tag := reflect.StructTag(field.StructTag)
-		if _, ok := tag.Lookup("header"); ok {
+		if _, ok := tag.Lookup(parser.TagHeader); ok {
 			return true
 		}
 	}
 	// Check if field is marked with // in:header comment
-	return field.InComment == "header"
+	return field.InComment == parser.SourceHeader
 }
 
 func (e *HeaderExtractor) GenerateCode(field *parser.Field, structName string) (string, []string) {
-	headerName := GetParameterName(field, "header")
+	headerName := GetParameterName(field, parser.TagHeader)
 	fieldName := field.Name
 	typeName := GetBaseType(field)
 
