@@ -15,7 +15,7 @@ func init() {
 type QueryExtractor struct{}
 
 func (e *QueryExtractor) Name() string {
-	return "query"
+	return parser.SourceQuery
 }
 
 func (e *QueryExtractor) Priority() int {
@@ -26,16 +26,16 @@ func (e *QueryExtractor) CanExtract(field *parser.Field) bool {
 	// Check if field has query tag
 	if field.StructTag != "" {
 		tag := reflect.StructTag(field.StructTag)
-		if _, ok := tag.Lookup("query"); ok {
+		if _, ok := tag.Lookup(parser.TagQuery); ok {
 			return true
 		}
 	}
 	// Check if field is marked with // in:query comment
-	return field.InComment == "query"
+	return field.InComment == parser.SourceQuery
 }
 
 func (e *QueryExtractor) GenerateCode(field *parser.Field, structName string) (string, []string) {
-	paramName := GetParameterName(field, "query")
+	paramName := GetParameterName(field, parser.TagQuery)
 	fieldName := field.Name
 	typeName := GetBaseType(field)
 

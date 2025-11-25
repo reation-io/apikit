@@ -59,6 +59,8 @@ type HandlerData struct {
 	HasValidation     bool
 	HasResponseWriter bool
 	HasRequest        bool
+	HasMultipartForm  bool
+	MaxMemory         int64 // Max memory for multipart form parsing (default 32MB)
 }
 
 // Generate creates wrapper code for the given handlers
@@ -159,6 +161,12 @@ func (g *Generator) prepareHandlerData(handler *parser.Handler, importsMap map[s
 	if hd.HasValidation {
 		// Add validator import
 		importsMap["github.com/reation-io/apikit/validator"] = true
+	}
+
+	// Check if multipart form parsing is needed
+	hd.HasMultipartForm = g.hasMultipartFormFields(handler.Struct)
+	if hd.HasMultipartForm {
+		hd.MaxMemory = 32 << 20 // 32MB default
 	}
 
 	return hd
@@ -299,6 +307,38 @@ func (g *Generator) hasValidationTags(s *parser.Struct) bool {
 			if _, ok := tag.Lookup("validate"); ok {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// hasMultipartFormFields checks if the struct has any multipart form fields
+// Returns true if any field has a form tag or is a file upload field
+func (g *Generator) hasMultipartFormFields(s *parser.Struct) bool {
+	for _, field := range s.Fields {
+		// Check embedded structs recursively
+		if field.IsEmbedded && field.NestedStruct != nil {
+			if g.hasMultipartFormFields(field.NestedStruct) {
+				return true
+			}
+		}
+
+		// Check if this is a file field
+		if field.IsFile {
+			return true
+		}
+
+		// Check if this field has a form tag
+		if field.StructTag != "" {
+			tag := reflect.StructTag(field.StructTag)
+			if _, ok := tag.Lookup("form"); ok {
+				return true
+			}
+		}
+
+		// Check if field is marked with // in:form comment
+		if field.InComment == "form" {
+			return true
 		}
 	}
 	return false

@@ -14,7 +14,7 @@ func init() {
 type BodyExtractor struct{}
 
 func (e *BodyExtractor) Name() string {
-	return "body"
+	return parser.SourceBody
 }
 
 func (e *BodyExtractor) Priority() int {
@@ -36,7 +36,7 @@ func (e *BodyExtractor) CanExtract(field *parser.Field) bool {
 	// Check if field has json tag
 	if field.StructTag != "" {
 		tag := reflect.StructTag(field.StructTag)
-		if _, ok := tag.Lookup("json"); ok {
+		if _, ok := tag.Lookup(parser.TagJSON); ok {
 			return true
 		}
 	}

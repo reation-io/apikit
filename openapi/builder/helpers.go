@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"strings"
 
+	"github.com/reation-io/apikit/openapi"
 	"github.com/reation-io/apikit/openapi/parsers"
 )
 
@@ -46,18 +47,18 @@ func parseRouteLine(comments *ast.CommentGroup) (*routeInfo, error) {
 		text = strings.TrimSuffix(text, "*/")
 		text = strings.TrimSpace(text)
 
-		if !strings.HasPrefix(text, "swagger:route") {
+		if !strings.HasPrefix(text, openapi.DirectiveRoute) {
 			continue
 		}
 
 		// Remove "swagger:route" prefix
-		text = strings.TrimPrefix(text, "swagger:route")
+		text = strings.TrimPrefix(text, openapi.DirectiveRoute)
 		text = strings.TrimSpace(text)
 
 		// Parse with quote awareness
 		parts := parseQuotedFields(text)
 		if len(parts) < 4 {
-			return nil, fmt.Errorf("invalid swagger:route format, expected: swagger:route METHOD PATH TAG OPERATION_ID")
+			return nil, fmt.Errorf("invalid %s format, expected: %s METHOD PATH TAG OPERATION_ID", openapi.DirectiveRoute, openapi.DirectiveRoute)
 		}
 
 		return &routeInfo{

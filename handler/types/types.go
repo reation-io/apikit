@@ -142,7 +142,7 @@ func (r *Registry) registerBuiltins() {
 	// time.Time - supports multiple common formats using apikit.NewTimeFromString helper
 	r.Register(&Extractor{
 		TypeName: "time.Time",
-		Import:   "github.com/reation-io/apikit/pkg/apikit",
+		Import:   "github.com/reation-io/apikit",
 		ParseFunc: func(varName, fieldName string, isPointer bool) string {
 			if isPointer {
 				return fmt.Sprintf(`if t, err := apikit.NewTimeFromString(%s); err == nil {

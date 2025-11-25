@@ -239,6 +239,11 @@ func extractRoutes(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
 			}
 		}
 
+		// Auto-generate multipart/form-data requestBody if Consumes includes it
+		if hasMultipartFormData(operation) {
+			generateMultipartRequestBody(operation, result)
+		}
+
 		// Add operation to path
 		if openapi.Paths.PathItems[routeInfo.Path] == nil {
 			openapi.Paths.PathItems[routeInfo.Path] = &spec.PathItem{}
@@ -293,6 +298,11 @@ func extractRoutesMulti(result *coreast.ParseResult, specs map[string]*spec.Open
 			if !isInvalidTargetError(err) {
 				return err
 			}
+		}
+
+		// Auto-generate multipart/form-data requestBody if Consumes includes it
+		if hasMultipartFormData(operation) {
+			generateMultipartRequestBody(operation, result)
 		}
 
 		// Get spec names from operation extensions
@@ -529,4 +539,150 @@ func typeToSchema(goType string, isPointer bool, isSlice bool) *spec.Schema {
 			Ref: "#/components/schemas/" + goType,
 		}
 	}
+}
+
+// hasMultipartFormData checks if operation consumes multipart/form-data
+func hasMultipartFormData(operation *spec.Operation) bool {
+	if operation.RequestBody == nil {
+		return false
+	}
+
+	_, ok := operation.RequestBody.Content["multipart/form-data"]
+	return ok
+}
+
+// generateMultipartRequestBody generates multipart/form-data schema from struct fields
+func generateMultipartRequestBody(operation *spec.Operation, result *coreast.ParseResult) {
+	if operation.RequestBody == nil || operation.RequestBody.Content["multipart/form-data"] == nil {
+		return
+	}
+
+	properties := make(map[string]*spec.Schema)
+	requiredMap := make(map[string]bool)
+
+	// Iterate through all structs to find form fields
+	for _, s := range result.Structs {
+		for _, field := range s.Fields {
+			// Check if field has form tag or in:form comment
+			isFormField := false
+			formName := ""
+
+			// Check for form tag
+			if field.Tag != "" {
+				tag := strings.Trim(field.Tag, "`")
+				if strings.Contains(tag, "form:") {
+					isFormField = true
+					// Extract form name from tag
+					formName = extractTagValue(tag, "form")
+				}
+			}
+
+			// Check for // in:form comment
+			if field.Doc != nil {
+				for _, comment := range field.Doc.List {
+					trimmed := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
+					if strings.HasPrefix(trimmed, "in:form") {
+						isFormField = true
+						// Extract custom name if provided: // in:form custom_name
+						parts := strings.Fields(trimmed)
+						if len(parts) > 1 && formName == "" {
+							formName = parts[1]
+						}
+						break
+					}
+				}
+			}
+
+			if !isFormField {
+				continue
+			}
+
+			// Use field name if no custom form name
+			if formName == "" {
+				formName = toSnakeCase(field.Name)
+			}
+
+			// Detect file upload fields
+			isFile := field.Type == "*multipart.FileHeader" || field.Type == "[]*multipart.FileHeader"
+
+			if isFile {
+				// File upload field
+				if strings.HasPrefix(field.Type, "[]") {
+					// Multiple files
+					properties[formName] = &spec.Schema{
+						Type: "array",
+						Items: &spec.Schema{
+							Type:   "string",
+							Format: "binary",
+						},
+					}
+				} else {
+					// Single file
+					properties[formName] = &spec.Schema{
+						Type:   "string",
+						Format: "binary",
+					}
+				}
+			} else {
+				// Regular form field - infer type from Go type
+				properties[formName] = typeToSchema(field.Type, strings.HasPrefix(field.Type, "*"), strings.HasPrefix(field.Type, "[]"))
+			}
+
+			// Check if required (validate tag)
+			if field.Tag != "" {
+				tag := strings.Trim(field.Tag, "`")
+				if strings.Contains(tag, "validate:") {
+					validateTag := extractTagValue(tag, "validate")
+					if strings.Contains(validateTag, "required") {
+						requiredMap[formName] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Convert required map to slice
+	required := make([]string, 0, len(requiredMap))
+	for fieldName := range requiredMap {
+		required = append(required, fieldName)
+	}
+
+	// Update the schema
+	mediaType := operation.RequestBody.Content["multipart/form-data"]
+	mediaType.Schema = &spec.Schema{
+		Type:       "object",
+		Properties: properties,
+		Required:   required,
+	}
+}
+
+// extractTagValue extracts value from struct tag like `form:"value"`
+func extractTagValue(tag, key string) string {
+	// Find key: pattern
+	keyPattern := key + `:"`
+	start := strings.Index(tag, keyPattern)
+	if start == -1 {
+		return ""
+	}
+	start += len(keyPattern)
+
+	// Find closing quote
+	end := strings.Index(tag[start:], `"`)
+	if end == -1 {
+		return ""
+	}
+
+	return tag[start : start+end]
+}
+
+// toSnakeCase converts CamelCase to snake_case
+func toSnakeCase(s string) string {
+	var result strings.Builder
+	for i, r := range s {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			result.WriteRune('_')
+		}
+		result.WriteRune(r)
+	}
+	return strings.ToLower(result.String())
 }

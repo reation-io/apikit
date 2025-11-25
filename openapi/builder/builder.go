@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	constants "github.com/reation-io/apikit/openapi"
 	"github.com/reation-io/apikit/openapi/parsers"
 	"github.com/reation-io/apikit/openapi/spec"
 
@@ -110,12 +111,12 @@ func (b *Builder) parseMeta(file *ast.File) error {
 		}
 
 		// Check if this is a swagger:meta comment
-		if !hasDirective(genDecl.Doc, "swagger:meta") {
+		if !hasDirective(genDecl.Doc, constants.DirectiveMeta) {
 			continue
 		}
 
 		// Parse meta tags into Info (ignoring invalid target errors)
-		if err := parsers.GlobalRegistry().Parse("swagger:meta", genDecl.Doc, b.spec.Info, parsers.ContextMeta); err != nil {
+		if err := parsers.GlobalRegistry().Parse(constants.DirectiveMeta, genDecl.Doc, b.spec.Info, parsers.ContextMeta); err != nil {
 			if !isInvalidTargetError(err) {
 				return err
 			}
@@ -123,7 +124,7 @@ func (b *Builder) parseMeta(file *ast.File) error {
 
 		// Parse meta tags that target OpenAPI root (Consumes, Produces, SecuritySchemes, Servers)
 		// Ignore invalid target errors since some parsers target Info, not OpenAPI
-		if err := parsers.GlobalRegistry().Parse("swagger:meta", genDecl.Doc, b.spec, parsers.ContextMeta); err != nil {
+		if err := parsers.GlobalRegistry().Parse(constants.DirectiveMeta, genDecl.Doc, b.spec, parsers.ContextMeta); err != nil {
 			if !isInvalidTargetError(err) {
 				return err
 			}
@@ -142,7 +143,7 @@ func (b *Builder) parseRoutes(file *ast.File) error {
 		}
 
 		// Check if this is a swagger:route comment
-		if !hasDirective(genDecl.Doc, "swagger:route") {
+		if !hasDirective(genDecl.Doc, constants.DirectiveRoute) {
 			continue
 		}
 
@@ -162,7 +163,7 @@ func (b *Builder) parseRoutes(file *ast.File) error {
 		}
 
 		// Parse operation tags
-		if err := parsers.GlobalRegistry().Parse("swagger:route", genDecl.Doc, operation, parsers.ContextRoute); err != nil {
+		if err := parsers.GlobalRegistry().Parse(constants.DirectiveRoute, genDecl.Doc, operation, parsers.ContextRoute); err != nil {
 			if !isInvalidTargetError(err) {
 				return err
 			}
@@ -175,19 +176,19 @@ func (b *Builder) parseRoutes(file *ast.File) error {
 
 		pathItem := b.spec.Paths.PathItems[routeInfo.Path]
 		switch strings.ToUpper(routeInfo.Method) {
-		case "GET":
+		case constants.MethodGET:
 			pathItem.Get = operation
-		case "POST":
+		case constants.MethodPOST:
 			pathItem.Post = operation
-		case "PUT":
+		case constants.MethodPUT:
 			pathItem.Put = operation
-		case "DELETE":
+		case constants.MethodDELETE:
 			pathItem.Delete = operation
-		case "PATCH":
+		case constants.MethodPATCH:
 			pathItem.Patch = operation
-		case "OPTIONS":
+		case constants.MethodOPTIONS:
 			pathItem.Options = operation
-		case "HEAD":
+		case constants.MethodHEAD:
 			pathItem.Head = operation
 		}
 	}
