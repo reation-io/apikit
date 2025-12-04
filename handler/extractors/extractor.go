@@ -160,7 +160,7 @@ func toCamelCase(s string) string {
 }
 
 // GetParameterName returns the parameter name to use for extraction
-// Priority: tag value > InCommentName > field name (converted to camelCase)
+// Priority: tag value > InCommentName > json tag > field name (converted to camelCase)
 // This is a public helper that can be used by custom extractors
 // Parameters:
 //   - field: The field to get the parameter name for
@@ -182,7 +182,21 @@ func GetParameterName(field *parser.Field, tagName string) string {
 		return field.InCommentName
 	}
 
-	// Priority 3: Convert field name to camelCase as fallback
+	// Priority 3: Use json tag value as fallback (handles omitempty)
+	if field.StructTag != "" {
+		tag := reflect.StructTag(field.StructTag)
+		if val, ok := tag.Lookup(parser.TagJSON); ok && val != "" {
+			// Handle "fieldName,omitempty" format - extract just the field name
+			if commaIdx := strings.Index(val, ","); commaIdx != -1 {
+				val = val[:commaIdx]
+			}
+			if val != "" && val != "-" {
+				return val
+			}
+		}
+	}
+
+	// Priority 4: Convert field name to camelCase as fallback
 	return toCamelCase(field.Name)
 }
 

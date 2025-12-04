@@ -193,6 +193,36 @@ func TestGetParameterName(t *testing.T) {
 			tagName:  "path",
 			expected: "user_id",
 		},
+		{
+			name:     "from json tag when no specific tag",
+			field:    &parser.Field{Name: "AccountID", StructTag: `json:"accountId" validate:"omitempty,uuid"`},
+			tagName:  "query",
+			expected: "accountId",
+		},
+		{
+			name:     "from json tag with omitempty",
+			field:    &parser.Field{Name: "UserID", StructTag: `json:"userId,omitempty"`},
+			tagName:  "query",
+			expected: "userId",
+		},
+		{
+			name:     "json tag ignored when specific tag exists",
+			field:    &parser.Field{Name: "AccountID", StructTag: `query:"account_id" json:"accountId"`},
+			tagName:  "query",
+			expected: "account_id",
+		},
+		{
+			name:     "json tag ignored when comment name exists",
+			field:    &parser.Field{Name: "AccountID", StructTag: `json:"accountId"`, InCommentName: "account_id"},
+			tagName:  "query",
+			expected: "account_id",
+		},
+		{
+			name:     "json tag with dash is ignored",
+			field:    &parser.Field{Name: "AccountID", StructTag: `json:"-"`},
+			tagName:  "query",
+			expected: "accountID",
+		},
 	}
 
 	for _, tt := range tests {

@@ -69,10 +69,9 @@ func UpdateAvatar(ctx context.Context, req UpdateAvatarPayload) (UpdateAvatarRes
 		t.Error("expected generated code to call ParseMultipartForm")
 	}
 
-	// Verify path parameter extraction (uses field name in snake_case: userID -> user_i_d)
-	// Actually, PathValue uses the field name directly
-	if !strings.Contains(generatedStr, `r.PathValue("userID")`) && !strings.Contains(generatedStr, `r.PathValue("user_id")`) {
-		t.Error("expected generated code to extract userID from path")
+	// Verify path parameter extraction (uses json tag value: json:"userId")
+	if !strings.Contains(generatedStr, `r.PathValue("userId")`) {
+		t.Error("expected generated code to extract userId from path")
 	}
 
 	if !strings.Contains(generatedStr, "payload.UserID") {
@@ -165,12 +164,12 @@ func UpdateProfile(ctx context.Context, req UpdateProfilePayload) (UpdateProfile
 	generatedStr := string(generated)
 
 	// Verify all form fields are extracted
-	// Note: GetParameterName converts to camelCase when no tag is present
+	// Note: GetParameterName uses json tag when no form tag is present
 	expectedFields := []string{
 		`r.FormValue("name")`,
 		`r.FormValue("bio")`,
 		`r.FormFile("avatar")`,
-		`r.FormFile("coverImage")`, // CoverImage -> coverImage (camelCase)
+		`r.FormFile("cover_image")`, // Uses json:"cover_image" tag value
 	}
 
 	for _, expected := range expectedFields {
