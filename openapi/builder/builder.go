@@ -408,7 +408,7 @@ func (b *Builder) parseStruct(structType *ast.StructType) *spec.Schema {
 				// Merge embedded schema properties
 				for propName, propSchema := range embeddedSchema.Properties {
 					if _, exists := schema.Properties[propName]; !exists {
-						schema.Properties[propName] = propSchema
+						schema.Properties[propName] = cloneSchema(propSchema)
 					}
 				}
 				// Merge embedded required fields
@@ -834,6 +834,110 @@ func getSpecNamesFromOperation(operation *spec.Operation) []string {
 	default:
 		return nil
 	}
+}
+
+// cloneSchema creates a deep copy of a schema
+func cloneSchema(s *spec.Schema) *spec.Schema {
+	if s == nil {
+		return nil
+	}
+
+	cloned := *s // Shallow copy struct
+
+	// Clone slices
+	if s.Required != nil {
+		cloned.Required = make([]string, len(s.Required))
+		copy(cloned.Required, s.Required)
+	}
+	if s.Enum != nil {
+		cloned.Enum = make([]any, len(s.Enum))
+		copy(cloned.Enum, s.Enum)
+	}
+
+	// Clone maps (and recursive schemas)
+	if s.Properties != nil {
+		cloned.Properties = make(map[string]*spec.Schema, len(s.Properties))
+		for k, v := range s.Properties {
+			cloned.Properties[k] = cloneSchema(v)
+		}
+	}
+
+	// Clone nested schemas
+	if s.Items != nil {
+		cloned.Items = cloneSchema(s.Items)
+	}
+	if s.AllOf != nil {
+		cloned.AllOf = make([]*spec.Schema, len(s.AllOf))
+		for i, v := range s.AllOf {
+			cloned.AllOf[i] = cloneSchema(v)
+		}
+	}
+	if s.OneOf != nil {
+		cloned.OneOf = make([]*spec.Schema, len(s.OneOf))
+		for i, v := range s.OneOf {
+			cloned.OneOf[i] = cloneSchema(v)
+		}
+	}
+	if s.AnyOf != nil {
+		cloned.AnyOf = make([]*spec.Schema, len(s.AnyOf))
+		for i, v := range s.AnyOf {
+			cloned.AnyOf[i] = cloneSchema(v)
+		}
+	}
+	if s.Not != nil {
+		cloned.Not = cloneSchema(s.Not)
+	}
+
+	// Clone AdditionalProperties if it's a schema
+	if s.AdditionalProperties != nil {
+		if schema, ok := s.AdditionalProperties.(*spec.Schema); ok {
+			cloned.AdditionalProperties = cloneSchema(schema)
+		}
+	}
+
+	// Clone pointers to primitives
+	if s.MultipleOf != nil {
+		v := *s.MultipleOf
+		cloned.MultipleOf = &v
+	}
+	if s.Maximum != nil {
+		v := *s.Maximum
+		cloned.Maximum = &v
+	}
+	if s.Minimum != nil {
+		v := *s.Minimum
+		cloned.Minimum = &v
+	}
+	if s.MaxLength != nil {
+		v := *s.MaxLength
+		cloned.MaxLength = &v
+	}
+	if s.MinLength != nil {
+		v := *s.MinLength
+		cloned.MinLength = &v
+	}
+	if s.MaxItems != nil {
+		v := *s.MaxItems
+		cloned.MaxItems = &v
+	}
+	if s.MinItems != nil {
+		v := *s.MinItems
+		cloned.MinItems = &v
+	}
+	if s.MaxProperties != nil {
+		v := *s.MaxProperties
+		cloned.MaxProperties = &v
+	}
+	if s.MinProperties != nil {
+		v := *s.MinProperties
+		cloned.MinProperties = &v
+	}
+	if s.XML != nil {
+		v := *s.XML
+		cloned.XML = &v
+	}
+
+	return &cloned
 }
 
 // cloneOperation creates a deep copy of an operation

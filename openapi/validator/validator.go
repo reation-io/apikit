@@ -207,8 +207,13 @@ func (v *Validator) validateSchema(path string, schema *spec.Schema) {
 	}
 
 	// Validate array items
-	if schema.Type == "array" && schema.Items == nil {
-		v.addError(path, "Array schema must have items definition")
+	if schema.Type == "array" {
+		if schema.Items == nil {
+			v.addError(path, "Array schema must have items definition")
+		}
+		if schema.MinItems != nil && schema.MaxItems != nil && *schema.MinItems > *schema.MaxItems {
+			v.addError(path, "MinItems cannot be greater than maxItems")
+		}
 	}
 
 	// Validate numeric constraints
