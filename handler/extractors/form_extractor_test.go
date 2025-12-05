@@ -42,7 +42,7 @@ func TestFormExtractor_CanExtract(t *testing.T) {
 			field: definition.Field{
 				Name:     "Description",
 				Type:     &definition.Type{GoType: "string", Kind: "primitive"},
-				Metadata: map[string]string{"in": "form"},
+				Metadata: map[string]any{"in": "form"},
 			},
 			expected: true,
 		},

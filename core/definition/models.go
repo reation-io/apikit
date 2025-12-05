@@ -99,8 +99,8 @@ type Field struct {
 	Type        *Type
 	Description string
 	Required    bool
-	Tags        string            // Raw struct tags
-	Metadata    map[string]string // Extra metadata (e.g. from comments)
+	Tags        string         // Raw struct tags
+	Metadata    map[string]any // Extra metadata (e.g. from comments)
 	// Doc contains raw documentation comments
 	Doc *ast.CommentGroup
 	// Comment contains inline comments

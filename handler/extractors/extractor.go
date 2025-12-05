@@ -178,7 +178,7 @@ func GetParameterName(field *definition.Field, tagName string) string {
 	}
 
 	// Priority 2: Use comment name if available (from parser Metadata)
-	if val := field.Metadata["in_name"]; val != "" {
+	if val, ok := field.Metadata["in_name"].(string); ok && val != "" {
 		return val
 	}
 

@@ -36,7 +36,7 @@ func TestQueryExtractor_CanExtract(t *testing.T) {
 		},
 		{
 			name:     "with in:query comment",
-			field:    &definition.Field{Metadata: map[string]string{"in": "query"}},
+			field:    &definition.Field{Metadata: map[string]any{"in": "query"}},
 			expected: true,
 		},
 		{

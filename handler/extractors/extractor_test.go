@@ -177,7 +177,7 @@ func TestGetParameterName(t *testing.T) {
 		},
 		{
 			name:     "from comment",
-			field:    &definition.Field{Name: "UserID", Metadata: map[string]string{"in_name": "user_id"}},
+			field:    &definition.Field{Name: "UserID", Metadata: map[string]any{"in_name": "user_id"}},
 			tagName:  "path",
 			expected: "user_id",
 		},
@@ -188,8 +188,12 @@ func TestGetParameterName(t *testing.T) {
 			expected: "userID",
 		},
 		{
-			name:     "empty tag value falls back to comment",
-			field:    &definition.Field{Name: "UserID", Tags: `path:""`, Metadata: map[string]string{"in_name": "user_id"}},
+			name: "empty tag value falls back to comment",
+			field: &definition.Field{
+				Name:     "QueryParam",
+				Type:     &definition.Type{GoType: "string"},
+				Metadata: map[string]any{"in_name": "q"},
+			},
 			tagName:  "path",
 			expected: "user_id",
 		},
@@ -213,7 +217,7 @@ func TestGetParameterName(t *testing.T) {
 		},
 		{
 			name:     "json tag ignored when comment name exists",
-			field:    &definition.Field{Name: "AccountID", Tags: `json:"accountId"`, Metadata: map[string]string{"in_name": "account_id"}},
+			field:    &definition.Field{Name: "AccountID", Tags: `json:"accountId"`, Metadata: map[string]any{"in_name": "account_id"}},
 			tagName:  "query",
 			expected: "account_id",
 		},

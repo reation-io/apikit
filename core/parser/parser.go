@@ -122,7 +122,7 @@ func (p *Parser) parseTypeExpr(expr ast.Expr) *definition.Type {
 					field := &definition.Field{
 						Name:     name,
 						Tags:     "",
-						Metadata: make(map[string]string),
+						Metadata: make(map[string]any),
 						Doc:      f.Doc,
 						Comment:  f.Comment,
 					}
@@ -225,11 +225,18 @@ func (p *Parser) parseType(s *coreast.Struct) *definition.Type {
 	}
 
 	for _, f := range s.Fields {
+		// Check for swagger:ignore in comments
+		if hasDirective(f.Doc, "swagger:ignore") {
+			continue
+		}
+		// Check for json:"-" which usually implies ignoring in API (unless specifically asked otherwise, but standard is ignore)
+		// But let's stick to explicit swagger:ignore for now to avoid over-optimizing generic json tags
+
 		field := &definition.Field{
 			Name:     f.Name,
 			Required: !f.IsPointer,
 			Tags:     f.Tag,
-			Metadata: make(map[string]string),
+			Metadata: make(map[string]any),
 			Doc:      f.Doc,
 			Comment:  f.Comment,
 		}
@@ -238,6 +245,20 @@ func (p *Parser) parseType(s *coreast.Struct) *definition.Type {
 		if val, ok := getTag(f.Tag, "json"); ok {
 			parts := strings.Split(val, ",")
 			field.JSONName = parts[0]
+			if parts[0] == "-" {
+				// We might still want it in the internal model, but maybe mark it?
+				// For now, let's keep it but knowing it's hidden from JSON
+			}
+		}
+
+		// Parse validate tag
+		if val, ok := getTag(f.Tag, "validate"); ok {
+			field.Metadata["validate"] = val
+		}
+
+		// Parse default tag
+		if val, ok := getTag(f.Tag, "default"); ok {
+			field.Metadata["default"] = val
 		}
 
 		// Resolve type using recursive helper

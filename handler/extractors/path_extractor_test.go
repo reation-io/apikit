@@ -36,7 +36,7 @@ func TestPathExtractor_CanExtract(t *testing.T) {
 		},
 		{
 			name:     "with in:path comment",
-			field:    &definition.Field{Metadata: map[string]string{"in": "path"}},
+			field:    &definition.Field{Metadata: map[string]any{"in": "path"}},
 			expected: true,
 		},
 		{
@@ -94,7 +94,7 @@ func TestPathExtractor_GenerateCode(t *testing.T) {
 			field: &definition.Field{
 				Name:     "UserID",
 				Type:     &definition.Type{GoType: "string", Kind: "primitive"},
-				Metadata: map[string]string{"in": "path", "in_name": "user_id"},
+				Metadata: map[string]any{"in": "path", "in_name": "user_id"},
 			},
 			expectedInCode: []string{
 				`r.PathValue("user_id")`,
