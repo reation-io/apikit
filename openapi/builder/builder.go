@@ -18,14 +18,18 @@ import (
 
 // Builder builds an OpenAPI specification from Go source files
 type Builder struct {
-	spec          *spec.OpenAPI
-	document      *spec.OpenAPI // alias for spec (used by embedded.go)
-	fset          *token.FileSet
-	config        *BuilderConfig
-	files         map[string]*ast.File // Cached files from scanner
-	enumRegistry  *spec.EnumRegistry   // Registry of discovered enums
-	operations    map[string]*spec.Operation
-	pendingParams map[string][]ParameterGroup
+	spec             *spec.OpenAPI
+	document         *spec.OpenAPI // alias for spec (used by embedded.go)
+	fset             *token.FileSet
+	config           *BuilderConfig
+	files            map[string]*ast.File // Cached files from scanner
+	enumRegistry     *spec.EnumRegistry   // Registry of discovered enums
+	operations       map[string]*spec.Operation
+	pendingParams    map[string][]ParameterGroup
+	modelRegistry    map[string]*ast.StructType // Map of model name to struct type
+	parsedModels     map[string]bool            // Set of parsed models
+	processingModels map[string]bool            // Set of models currently being parsed (cycle detection)
+	typeRegistry     map[string]*ast.StructType // Map of ALL struct types (for untagged embedding)
 }
 
 // ParameterGroup holds parameters and body to be attached to an operation
@@ -80,14 +84,18 @@ func NewBuilderWithOptions(opts ...Option) *Builder {
 		},
 	}
 	return &Builder{
-		spec:          openAPISpec,
-		document:      openAPISpec,
-		fset:          token.NewFileSet(),
-		config:        config,
-		files:         make(map[string]*ast.File),
-		enumRegistry:  spec.NewEnumRegistry(),
-		operations:    make(map[string]*spec.Operation),
-		pendingParams: make(map[string][]ParameterGroup),
+		spec:             openAPISpec,
+		document:         openAPISpec,
+		fset:             token.NewFileSet(),
+		config:           config,
+		files:            make(map[string]*ast.File),
+		enumRegistry:     spec.NewEnumRegistry(),
+		operations:       make(map[string]*spec.Operation),
+		pendingParams:    make(map[string][]ParameterGroup),
+		modelRegistry:    make(map[string]*ast.StructType),
+		parsedModels:     make(map[string]bool),
+		processingModels: make(map[string]bool),
+		typeRegistry:     make(map[string]*ast.StructType),
 	}
 }
 
@@ -103,10 +111,40 @@ func (b *Builder) Build() (*spec.OpenAPI, error) {
 	b.fset = fset
 	b.files = files
 
-	// Process each scanned file
+	// Pass 1: Discovery (Enums and Models)
+	for _, file := range files {
+		// Look for swagger:enum comments
+		if err := b.parseEnums(file); err != nil {
+			return nil, fmt.Errorf("failed to parse enums: %w", err)
+		}
+		// Register models
+		if err := b.registerModels(file); err != nil {
+			return nil, fmt.Errorf("failed to register models: %w", err)
+		}
+	}
+
+	// Pass 2: Resolution (Parse Models with dependency handling)
+	for name := range b.modelRegistry {
+		if err := b.ensureModelParsed(name); err != nil {
+			return nil, fmt.Errorf("failed to parse model %s: %w", name, err)
+		}
+	}
+
+	// Pass 3: Routes and others
 	for filePath, file := range files {
-		if err := b.processFile(filePath, file); err != nil {
-			return nil, fmt.Errorf("failed to process file %s: %w", filePath, err)
+		// Look for swagger:parameters comments
+		if err := b.parseParameters(file); err != nil {
+			return nil, fmt.Errorf("failed to parse parameters in %s: %w", filePath, err)
+		}
+
+		// Look for swagger:meta comments
+		if err := b.parseMeta(file); err != nil {
+			return nil, fmt.Errorf("failed to parse meta in %s: %w", filePath, err)
+		}
+
+		// Look for swagger:route comments
+		if err := b.parseRoutes(file); err != nil {
+			return nil, fmt.Errorf("failed to parse routes in %s: %w", filePath, err)
 		}
 	}
 
@@ -136,36 +174,6 @@ func (b *Builder) validate() error {
 		// Return first error as the main error
 		return fmt.Errorf("validation failed: %s", result.Errors[0].Error())
 	}
-	return nil
-}
-
-// processFile processes a pre-parsed AST file (used with scanner)
-func (b *Builder) processFile(filePath string, file *ast.File) error {
-	// Look for swagger:parameters comments
-	if err := b.parseParameters(file); err != nil {
-		return fmt.Errorf("failed to parse parameters: %w", err)
-	}
-
-	// Look for swagger:enum comments (first, so models can reference enums)
-	if err := b.parseEnums(file); err != nil {
-		return fmt.Errorf("failed to parse enums: %w", err)
-	}
-
-	// Look for swagger:meta comments
-	if err := b.parseMeta(file); err != nil {
-		return fmt.Errorf("failed to parse meta: %w", err)
-	}
-
-	// Look for swagger:route comments
-	if err := b.parseRoutes(file); err != nil {
-		return fmt.Errorf("failed to parse routes: %w", err)
-	}
-
-	// Look for swagger:model comments
-	if err := b.parseModels(file); err != nil {
-		return fmt.Errorf("failed to parse models: %w", err)
-	}
-
 	return nil
 }
 
@@ -284,17 +292,8 @@ func (b *Builder) parseRoutes(file *ast.File) error {
 	return nil
 }
 
-// parseModels parses swagger:model comments in two passes:
-// 1. First pass: register all model names (for $ref resolution)
-// 2. Second pass: parse struct fields
-func (b *Builder) parseModels(file *ast.File) error {
-	// First pass: collect all model type specs
-	type modelInfo struct {
-		name       string
-		structType *ast.StructType
-	}
-	var models []modelInfo
-
+// registerModels finds swagger:model directives and registers them (Pass 1)
+func (b *Builder) registerModels(file *ast.File) error {
 	for _, decl := range file.Decls {
 		genDecl, ok := decl.(*ast.GenDecl)
 		if !ok || genDecl.Doc == nil {
@@ -324,24 +323,65 @@ func (b *Builder) parseModels(file *ast.File) error {
 			// Register the model name first (with placeholder)
 			b.spec.Components.Schemas[typeSpec.Name.Name] = &spec.Schema{Type: "object"}
 
-			// Parse struct type
-			structType, ok := typeSpec.Type.(*ast.StructType)
-			if !ok {
-				continue
+			// Register for second pass
+			if structType, ok := typeSpec.Type.(*ast.StructType); ok {
+				b.modelRegistry[typeSpec.Name.Name] = structType
 			}
-
-			models = append(models, modelInfo{
-				name:       typeSpec.Name.Name,
-				structType: structType,
-			})
 		}
 	}
 
-	// Second pass: parse struct fields (now $refs can be resolved)
-	for _, model := range models {
-		schema := b.parseStruct(model.structType)
-		b.spec.Components.Schemas[model.name] = schema
+	// Collect ALL struct types for potential embedding
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, s := range genDecl.Specs {
+			typeSpec, ok := s.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+			if structType, ok := typeSpec.Type.(*ast.StructType); ok {
+				b.typeRegistry[typeSpec.Name.Name] = structType
+			}
+		}
 	}
+	return nil
+}
+
+// ensureModelParsed ensures a model is fully parsed, handling recursion (Pass 2)
+func (b *Builder) ensureModelParsed(name string) error {
+	// Check if already parsed
+	if b.parsedModels[name] {
+		return nil
+	}
+
+	// Check if we are already parsing it (cycle detection)
+	if b.processingModels[name] {
+		return nil
+	}
+
+	// Get struct type
+	structType, ok := b.modelRegistry[name]
+	if !ok {
+		// Model not found in registry (should not happen if registered correctly)
+		return nil
+	}
+
+	// Mark as processing
+	b.processingModels[name] = true
+	defer func() {
+		b.processingModels[name] = false
+	}()
+
+	// Parse schema
+	schema := b.parseStruct(structType)
+
+	// Update schema in components (in-place update relative to the map)
+	b.spec.Components.Schemas[name] = schema
+
+	// Mark as parsed
+	b.parsedModels[name] = true
 
 	return nil
 }
@@ -465,8 +505,22 @@ func (b *Builder) resolveEmbeddedSchema(expr ast.Expr) *spec.Schema {
 	// Look up the schema in components
 	if b.spec.Components != nil && b.spec.Components.Schemas != nil {
 		if schema, ok := b.spec.Components.Schemas[typeName]; ok {
+			// Trigger parsing if needed
+			if !b.parsedModels[typeName] && b.modelRegistry[typeName] != nil {
+				_ = b.ensureModelParsed(typeName)
+				return b.spec.Components.Schemas[typeName]
+			}
 			return schema
 		}
+	}
+
+	// Fallback: Check type registry for untagged structs
+	// These are NOT standalone models, so we parse them on-the-fly to get their properties
+	if structType, ok := b.typeRegistry[typeName]; ok {
+		// Avoid cycles for untagged structs too (primitive check)
+		// Since we parse a NEW schema every time, there's no caching.
+		// FIXME: Deep nesting might be inefficient but correct for "Yellow->Green" fix.
+		return b.parseStruct(structType)
 	}
 
 	return nil

@@ -318,6 +318,9 @@ func (v *Validator) validateOperation(path string, operation *spec.Operation) {
 		v.validateParameter(fmt.Sprintf("%s.parameters[%d]", path, i), param)
 	}
 
+	// Validate path parameters consistency
+	v.validatePathParametersConsistency(path, operation)
+
 	// Validate request body
 	if operation.RequestBody != nil {
 		v.validateRequestBody(fmt.Sprintf("%s.requestBody", path), operation.RequestBody)
@@ -461,6 +464,70 @@ func (v *Validator) validateSecurityRequirements(path string, requirements []spe
 				v.addError(fmt.Sprintf("%s[%d]", path, i),
 					fmt.Sprintf("Security scheme '%s' not found in components", schemeName))
 			}
+		}
+	}
+}
+
+// validatePathParametersConsistency validates that path parameters match the path template
+func (v *Validator) validatePathParametersConsistency(contextPath string, operation *spec.Operation) {
+	// Extract path from context (e.g., paths./users/{id}.get -> /users/{id})
+	// This is a bit hacky, relying on the contextPath format constructed in validatePath
+	parts := strings.Split(contextPath, ".")
+	if len(parts) < 2 {
+		return
+	}
+	// The path part might contain dots, so we need to be careful.
+	// The format is paths.<path>.<method> or similar.
+	// But validateOperation receives `paths./users/{id}.get`.
+	// Let's assume the path string is passed down or stored.
+	// Actually, contextPath is just for error reporting strings.
+	// We need the ACTUAL URL path template to validate.
+	// The generic validator doesn't seem to pass it down easily.
+	// Let's reconstruct it or change signature if needed.
+	// Wait! v.operationIDs stores path! But incomplete.
+
+	// Better approach: pass path template to validateOperation.
+	// Since I can't easily change the signature everywhere in one go without breaking,
+	// I'll parse it from contextPath which looks like "paths./foo/bar.get"
+	// Find the substring between "paths." and result of last dot
+
+	start := strings.Index(contextPath, "paths.")
+	if start == -1 {
+		return
+	}
+	start += 6 // len("paths.")
+
+	end := strings.LastIndex(contextPath, ".")
+	if end == -1 || end <= start {
+		return
+	}
+
+	pathTemplate := contextPath[start:end]
+
+	// Find parameters defined in path
+	requiredParams := make(map[string]bool)
+	matches := regexp.MustCompile(`\{([^}]+)\}`).FindAllStringSubmatch(pathTemplate, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			requiredParams[match[1]] = true
+		}
+	}
+
+	// Check defined parameters
+	definedParams := make(map[string]bool)
+	for _, param := range operation.Parameters {
+		if param.In == "path" {
+			definedParams[param.Name] = true
+			if !requiredParams[param.Name] {
+				v.addError(contextPath, fmt.Sprintf("Parameter '%s' is in location 'path' but not in path template '%s'", param.Name, pathTemplate))
+			}
+		}
+	}
+
+	// Check missing parameters
+	for req := range requiredParams {
+		if !definedParams[req] {
+			v.addError(contextPath, fmt.Sprintf("Path parameter '%s' is missing from operation parameters", req))
 		}
 	}
 }
