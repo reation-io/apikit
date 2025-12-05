@@ -9,9 +9,11 @@ import (
 )
 
 var (
-	// rxDescription matches "Description:" followed by content until next directive or end
+	// rxDescription matches "Description:" at the start of a line (case-insensitive)
+	// followed by content until next directive or end
 	// Stops at lines starting with capital letter followed by colon (e.g., "Security:", "Responses:")
-	rxDescription = regexp.MustCompile(`(?ims)[Dd]escription\s*:\s*(.*?)(?:^[A-Z][a-zA-Z]*:\s*$|\z)`)
+	// Uses (?:^|\n) to ensure we only match Description: at line start, not inside YAML
+	rxDescription = regexp.MustCompile(`(?ms)(?:^|\n)[Dd]escription\s*:\s*(.*?)(?:\n[A-Z][a-zA-Z]*:\s*|\z)`)
 )
 
 // NewDescriptionParser creates a reusable Description parser

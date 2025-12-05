@@ -9,7 +9,13 @@ import (
 
 func TestBuilder_Meta(t *testing.T) {
 	// Create a temporary directory
+	// Create a temporary directory
 	tmpDir := t.TempDir()
+
+	// Create go.mod
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+		t.Fatalf("failed to write go.mod: %v", err)
+	}
 
 	// Create a test file with swagger:meta
 	testFile := filepath.Join(tmpDir, "api.go")
@@ -27,7 +33,10 @@ type API struct{}
 	}
 
 	// Build the spec
-	builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+	builder := NewBuilderWithOptions(
+		WithDir(tmpDir),
+		WithPattern("."),
+	)
 	openapi, err := builder.Build()
 	if err != nil {
 		t.Fatalf("failed to build spec: %v", err)
@@ -47,7 +56,13 @@ type API struct{}
 
 func TestBuilder_Route(t *testing.T) {
 	// Create a temporary directory
+	// Create a temporary directory
 	tmpDir := t.TempDir()
+
+	// Create go.mod
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+		t.Fatalf("failed to write go.mod: %v", err)
+	}
 
 	// Create a test file with swagger:route
 	testFile := filepath.Join(tmpDir, "handlers.go")
@@ -63,7 +78,10 @@ type CreateUserRequest struct{}
 	}
 
 	// Build the spec
-	builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+	builder := NewBuilderWithOptions(
+		WithDir(tmpDir),
+		WithPattern("."),
+	)
 	openapi, err := builder.Build()
 	if err != nil {
 		t.Fatalf("failed to build spec: %v", err)
@@ -92,7 +110,13 @@ type CreateUserRequest struct{}
 
 func TestBuilder_Model(t *testing.T) {
 	// Create a temporary directory
+	// Create a temporary directory
 	tmpDir := t.TempDir()
+
+	// Create go.mod
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+		t.Fatalf("failed to write go.mod: %v", err)
+	}
 
 	// Create a test file with swagger:model
 	testFile := filepath.Join(tmpDir, "models.go")
@@ -118,7 +142,10 @@ type User struct {
 	}
 
 	// Build the spec
-	builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+	builder := NewBuilderWithOptions(
+		WithDir(tmpDir),
+		WithPattern("."),
+	)
 	openapi, err := builder.Build()
 	if err != nil {
 		t.Fatalf("failed to build spec: %v", err)
@@ -173,4 +200,222 @@ func TestBuilder_JSON(t *testing.T) {
 
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || (len(s) > 0 && (s[0:len(substr)] == substr || contains(s[1:], substr))))
+}
+
+func TestNewBuilderWithOptions(t *testing.T) {
+	t.Run("default options", func(t *testing.T) {
+		builder := NewBuilderWithOptions()
+
+		if builder.config == nil {
+			t.Fatal("expected config to be set")
+		}
+		if builder.spec == nil {
+			t.Fatal("expected spec to be initialized")
+		}
+		if builder.spec.OpenAPI != "3.0.3" {
+			t.Errorf("expected OpenAPI version '3.0.3', got %q", builder.spec.OpenAPI)
+		}
+	})
+
+	t.Run("with pattern option enables scanner", func(t *testing.T) {
+		builder := NewBuilderWithOptions(
+			WithPattern("./..."),
+		)
+
+		if builder.config.ScannerConfig.Pattern != "./..." {
+			t.Errorf("expected pattern './...', got %q", builder.config.ScannerConfig.Pattern)
+		}
+	})
+
+	t.Run("with dir option", func(t *testing.T) {
+		builder := NewBuilderWithOptions(
+			WithDir("/project"),
+		)
+
+		if builder.config.ScannerConfig.Dir != "/project" {
+			t.Errorf("expected dir '/project', got %q", builder.config.ScannerConfig.Dir)
+		}
+	})
+
+	t.Run("with ignore paths", func(t *testing.T) {
+		builder := NewBuilderWithOptions(
+			WithPattern("./..."),
+			WithIgnorePaths("vendor/**", "test/**"),
+		)
+
+		if len(builder.config.ScannerConfig.IgnorePaths) != 2 {
+			t.Errorf("expected 2 ignore paths, got %d", len(builder.config.ScannerConfig.IgnorePaths))
+		}
+	})
+
+	t.Run("with validation", func(t *testing.T) {
+		builder := NewBuilderWithOptions(
+			WithValidation(true),
+		)
+
+		if !builder.config.Validation {
+			t.Error("expected Validation to be true")
+		}
+	})
+}
+
+func TestBuilder_WithScanner(t *testing.T) {
+	t.Run("scan current package", func(t *testing.T) {
+		// This test scans the builder package itself
+		builder := NewBuilderWithOptions(
+			WithPattern("."),
+			WithDir("."),
+		)
+
+		spec, err := builder.Build()
+		if err != nil {
+			t.Fatalf("failed to build with scanner: %v", err)
+		}
+
+		// The spec should be valid even if no swagger annotations are found
+		if spec == nil {
+			t.Fatal("expected spec to be returned")
+		}
+		if spec.OpenAPI != "3.0.3" {
+			t.Errorf("expected OpenAPI version '3.0.3', got %q", spec.OpenAPI)
+		}
+	})
+}
+
+func TestBuilder_Validation(t *testing.T) {
+	t.Run("validation enabled catches errors", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create go.mod
+		if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+			t.Fatalf("failed to write go.mod: %v", err)
+		}
+
+		// Create a test file with invalid route (operation without responses)
+		testFile := filepath.Join(tmpDir, "api.go")
+		content := `package main
+
+// swagger:route GET /users users listUsers
+// Summary: List all users
+type ListUsersRequest struct{}
+`
+		if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		builder := NewBuilderWithOptions(
+			WithDir(tmpDir),
+			WithPattern("."),
+			WithValidation(true),
+		)
+
+		_, err := builder.Build()
+		if err == nil {
+			t.Error("expected validation error for operation without responses")
+		}
+	})
+
+	t.Run("validation disabled allows invalid spec", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create go.mod
+		if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+			t.Fatalf("failed to write go.mod: %v", err)
+		}
+
+		// Create a test file with invalid spec (missing title)
+		testFile := filepath.Join(tmpDir, "api.go")
+		content := `package main
+
+// swagger:meta
+// Version: 1.0.0
+type API struct{}
+`
+		if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		builder := NewBuilderWithOptions(
+			WithDir(tmpDir),
+			WithPattern("."),
+			WithValidation(false),
+		)
+
+		spec, err := builder.Build()
+		if err != nil {
+			t.Fatalf("build failed: %v", err)
+		}
+		if spec == nil {
+			t.Error("expected spec to be returned")
+		}
+	})
+
+	t.Run("Validate method returns result", func(t *testing.T) {
+		builder := NewBuilder()
+		// Default spec should be valid
+		result := builder.Validate()
+
+		if result == nil {
+			t.Error("expected validation result")
+		}
+	})
+}
+
+func TestBuilder_SwaggerIgnore(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create go.mod
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+		t.Fatalf("failed to write go.mod: %v", err)
+	}
+
+	t.Run("ignores fields in models", func(t *testing.T) {
+		testFile := filepath.Join(tmpDir, "models.go")
+		content := `package test
+
+// User represents a user in the system
+// swagger:model
+type User struct {
+	// ID of the user
+	ID string ` + "`json:\"id\"`" + `
+
+	// Name of the user
+	Name string ` + "`json:\"name\"`" + `
+
+	// swagger:ignore
+	// Internal token - should not appear in spec
+	InternalToken string ` + "`json:\"internal_token\"`" + `
+}
+`
+		if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		builder := NewBuilderWithOptions(
+			WithDir(tmpDir),
+			WithPattern("."),
+		)
+		openapi, err := builder.Build()
+		if err != nil {
+			t.Fatalf("failed to build spec: %v", err)
+		}
+
+		schema := openapi.Components.Schemas["User"]
+		if schema == nil {
+			t.Fatal("expected User schema")
+		}
+
+		// Check that id and name are present
+		if _, ok := schema.Properties["id"]; !ok {
+			t.Error("expected 'id' property")
+		}
+		if _, ok := schema.Properties["name"]; !ok {
+			t.Error("expected 'name' property")
+		}
+
+		// Check that internal_token is NOT present
+		if _, ok := schema.Properties["internal_token"]; ok {
+			t.Error("'internal_token' should be ignored via swagger:ignore")
+		}
+	})
 }

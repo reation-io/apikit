@@ -200,10 +200,166 @@ func NewPatternParser() parsers.TagParser {
 	)
 }
 
+// NewMultipleOfParser creates a MultipleOf parser for field comments
+func NewMultipleOfParser() parsers.TagParser {
+	return base.NewSingleLineParser(
+		"MultipleOf",
+		parsers.RxMultipleOf,
+		[]parsers.ParseContext{parsers.ContextField},
+		parsers.SetterMap{
+			parsers.ContextField: func(target any, value any) error {
+				schema, ok := target.(*spec.Schema)
+				if !ok {
+					return &parsers.ErrInvalidTarget{
+						ParserName:   "MultipleOf",
+						Context:      parsers.ContextField,
+						ExpectedType: "*spec.Schema",
+						ActualType:   getTypeName(target),
+					}
+				}
+				multStr, ok := value.(string)
+				if !ok {
+					return &parsers.ErrInvalidValue{
+						ParserName:   "MultipleOf",
+						ExpectedType: "string",
+						ActualType:   getTypeName(value),
+					}
+				}
+				mult, err := strconv.ParseFloat(multStr, 64)
+				if err != nil {
+					return &parsers.ErrParseFailure{
+						ParserName: "MultipleOf",
+						Context:    parsers.ContextField,
+						Cause:      err,
+					}
+				}
+				schema.MultipleOf = &mult
+				return nil
+			},
+		},
+	)
+}
+
+// NewMinItemsParser creates a MinItems parser for field comments
+func NewMinItemsParser() parsers.TagParser {
+	return base.NewSingleLineParser(
+		"MinItems",
+		parsers.RxMinItems,
+		[]parsers.ParseContext{parsers.ContextField},
+		parsers.SetterMap{
+			parsers.ContextField: func(target any, value any) error {
+				schema, ok := target.(*spec.Schema)
+				if !ok {
+					return &parsers.ErrInvalidTarget{
+						ParserName:   "MinItems",
+						Context:      parsers.ContextField,
+						ExpectedType: "*spec.Schema",
+						ActualType:   getTypeName(target),
+					}
+				}
+				minItemsStr, ok := value.(string)
+				if !ok {
+					return &parsers.ErrInvalidValue{
+						ParserName:   "MinItems",
+						ExpectedType: "string",
+						ActualType:   getTypeName(value),
+					}
+				}
+				minItems, err := strconv.ParseInt(minItemsStr, 10, 64)
+				if err != nil {
+					return &parsers.ErrParseFailure{
+						ParserName: "MinItems",
+						Context:    parsers.ContextField,
+						Cause:      err,
+					}
+				}
+				schema.MinItems = &minItems
+				return nil
+			},
+		},
+	)
+}
+
+// NewMaxItemsParser creates a MaxItems parser for field comments
+func NewMaxItemsParser() parsers.TagParser {
+	return base.NewSingleLineParser(
+		"MaxItems",
+		parsers.RxMaxItems,
+		[]parsers.ParseContext{parsers.ContextField},
+		parsers.SetterMap{
+			parsers.ContextField: func(target any, value any) error {
+				schema, ok := target.(*spec.Schema)
+				if !ok {
+					return &parsers.ErrInvalidTarget{
+						ParserName:   "MaxItems",
+						Context:      parsers.ContextField,
+						ExpectedType: "*spec.Schema",
+						ActualType:   getTypeName(target),
+					}
+				}
+				maxItemsStr, ok := value.(string)
+				if !ok {
+					return &parsers.ErrInvalidValue{
+						ParserName:   "MaxItems",
+						ExpectedType: "string",
+						ActualType:   getTypeName(value),
+					}
+				}
+				maxItems, err := strconv.ParseInt(maxItemsStr, 10, 64)
+				if err != nil {
+					return &parsers.ErrParseFailure{
+						ParserName: "MaxItems",
+						Context:    parsers.ContextField,
+						Cause:      err,
+					}
+				}
+				schema.MaxItems = &maxItems
+				return nil
+			},
+		},
+	)
+}
+
+// NewUniqueItemsParser creates a UniqueItems parser for field comments
+func NewUniqueItemsParser() parsers.TagParser {
+	return base.NewSingleLineParser(
+		"UniqueItems",
+		parsers.RxUniqueItems,
+		[]parsers.ParseContext{parsers.ContextField},
+		parsers.SetterMap{
+			parsers.ContextField: func(target any, value any) error {
+				schema, ok := target.(*spec.Schema)
+				if !ok {
+					return &parsers.ErrInvalidTarget{
+						ParserName:   "UniqueItems",
+						Context:      parsers.ContextField,
+						ExpectedType: "*spec.Schema",
+						ActualType:   getTypeName(target),
+					}
+				}
+				valStr, ok := value.(string)
+				if !ok {
+					return &parsers.ErrInvalidValue{
+						ParserName:   "UniqueItems",
+						ExpectedType: "string",
+						ActualType:   getTypeName(value),
+					}
+				}
+				schema.UniqueItems = valStr == "true" || valStr == "yes"
+				return nil
+			},
+		},
+	)
+}
+
 func init() {
 	parsers.Register("swagger:model", NewMinimumParser())
 	parsers.Register("swagger:model", NewMaximumParser())
 	parsers.Register("swagger:model", NewMinLengthParser())
 	parsers.Register("swagger:model", NewMaxLengthParser())
+	parsers.Register("swagger:model", NewMinItemsParser())
+	parsers.Register("swagger:model", NewMaxItemsParser())
+	parsers.Register("swagger:model", NewUniqueItemsParser())
+	parsers.Register("swagger:model", NewMultipleOfParser())
 	parsers.Register("swagger:model", NewPatternParser())
 }

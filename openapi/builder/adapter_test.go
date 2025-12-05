@@ -5,7 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	coreast "github.com/reation-io/apikit/core/ast"
+	"github.com/reation-io/apikit/core/definition"
+	"github.com/reation-io/apikit/core/parser"
 )
 
 func TestExtractFromGeneric(t *testing.T) {
@@ -48,15 +49,15 @@ type CreateUserRequest struct {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	// Parse with generic parser
-	genericParser := coreast.New()
-	genericResult, err := genericParser.Parse(testFile)
+	// Parse with core parser
+	p := parser.New()
+	def, err := p.ParseFile(testFile)
 	if err != nil {
-		t.Fatalf("generic parse failed: %v", err)
+		t.Fatalf("core parser failed: %v", err)
 	}
 
 	// Extract OpenAPI-specific information
-	openapi, err := ExtractFromGeneric([]*coreast.ParseResult{genericResult})
+	openapi, err := ExtractFromGeneric([]*definition.Definition{def})
 	if err != nil {
 		t.Fatalf("ExtractFromGeneric failed: %v", err)
 	}
@@ -149,4 +150,3 @@ type CreateUserRequest struct {
 		t.Errorf("expected 'email' type 'string', got %q", emailProp.Type)
 	}
 }
-

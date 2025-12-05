@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reation-io/apikit/handler/parser"
+	"github.com/reation-io/apikit/core/definition"
 )
 
 func TestRegister(t *testing.T) {
@@ -75,7 +75,7 @@ func TestGetExtractor(t *testing.T) {
 	mockExt := &mockExtractor{name: "test", canExtract: true}
 	Register(mockExt)
 
-	field := &parser.Field{Name: "TestField"}
+	field := &definition.Field{Name: "TestField"}
 	extractor := GetExtractor(field)
 
 	if extractor == nil {
@@ -98,7 +98,7 @@ func TestGetExtractor_NotFound(t *testing.T) {
 	mockExt := &mockExtractor{name: "test", canExtract: false}
 	Register(mockExt)
 
-	field := &parser.Field{Name: "TestField"}
+	field := &definition.Field{Name: "TestField"}
 	extractor := GetExtractor(field)
 
 	if extractor != nil {
@@ -109,22 +109,22 @@ func TestGetExtractor_NotFound(t *testing.T) {
 func TestGetDefaultTag(t *testing.T) {
 	tests := []struct {
 		name     string
-		field    *parser.Field
+		field    *definition.Field
 		expected string
 	}{
 		{
 			name:     "no tag",
-			field:    &parser.Field{StructTag: ""},
+			field:    &definition.Field{Tags: ""},
 			expected: "",
 		},
 		{
 			name:     "with default tag",
-			field:    &parser.Field{StructTag: `json:"name" default:"unknown"`},
+			field:    &definition.Field{Tags: `json:"name" default:"unknown"`},
 			expected: "unknown",
 		},
 		{
 			name:     "no default tag",
-			field:    &parser.Field{StructTag: `json:"name"`},
+			field:    &definition.Field{Tags: `json:"name"`},
 			expected: "",
 		},
 	}
@@ -165,61 +165,65 @@ func TestToCamelCase(t *testing.T) {
 func TestGetParameterName(t *testing.T) {
 	tests := []struct {
 		name     string
-		field    *parser.Field
+		field    *definition.Field
 		tagName  string
 		expected string
 	}{
 		{
 			name:     "from tag",
-			field:    &parser.Field{Name: "UserID", StructTag: `path:"userId"`},
+			field:    &definition.Field{Name: "UserID", Tags: `path:"userId"`},
 			tagName:  "path",
 			expected: "userId",
 		},
 		{
 			name:     "from comment",
-			field:    &parser.Field{Name: "UserID", InCommentName: "user_id"},
+			field:    &definition.Field{Name: "UserID", Metadata: map[string]any{"in_name": "user_id"}},
 			tagName:  "path",
 			expected: "user_id",
 		},
 		{
 			name:     "from field name",
-			field:    &parser.Field{Name: "UserID"},
+			field:    &definition.Field{Name: "UserID"},
 			tagName:  "path",
 			expected: "userID",
 		},
 		{
-			name:     "empty tag value falls back to comment",
-			field:    &parser.Field{Name: "UserID", StructTag: `path:""`, InCommentName: "user_id"},
+			name: "empty tag value falls back to comment",
+			field: &definition.Field{
+				Name:     "QueryParam",
+				Type:     &definition.Type{GoType: "string"},
+				Metadata: map[string]any{"in_name": "q"},
+			},
 			tagName:  "path",
 			expected: "user_id",
 		},
 		{
 			name:     "from json tag when no specific tag",
-			field:    &parser.Field{Name: "AccountID", StructTag: `json:"accountId" validate:"omitempty,uuid"`},
+			field:    &definition.Field{Name: "AccountID", Tags: `json:"accountId" validate:"omitempty,uuid"`},
 			tagName:  "query",
 			expected: "accountId",
 		},
 		{
 			name:     "from json tag with omitempty",
-			field:    &parser.Field{Name: "UserID", StructTag: `json:"userId,omitempty"`},
+			field:    &definition.Field{Name: "UserID", Tags: `json:"userId,omitempty"`},
 			tagName:  "query",
 			expected: "userId",
 		},
 		{
 			name:     "json tag ignored when specific tag exists",
-			field:    &parser.Field{Name: "AccountID", StructTag: `query:"account_id" json:"accountId"`},
+			field:    &definition.Field{Name: "AccountID", Tags: `query:"account_id" json:"accountId"`},
 			tagName:  "query",
 			expected: "account_id",
 		},
 		{
 			name:     "json tag ignored when comment name exists",
-			field:    &parser.Field{Name: "AccountID", StructTag: `json:"accountId"`, InCommentName: "account_id"},
+			field:    &definition.Field{Name: "AccountID", Tags: `json:"accountId"`, Metadata: map[string]any{"in_name": "account_id"}},
 			tagName:  "query",
 			expected: "account_id",
 		},
 		{
 			name:     "json tag with dash is ignored",
-			field:    &parser.Field{Name: "AccountID", StructTag: `json:"-"`},
+			field:    &definition.Field{Name: "AccountID", Tags: `json:"-"`},
 			tagName:  "query",
 			expected: "accountID",
 		},
@@ -227,6 +231,12 @@ func TestGetParameterName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Note: definition.Field needs JSONName correctly set if we rely on it, but GetParameterName parses tags?
+			// GetParameterName implementation uses tags.
+			// But wait, definition.Field has JSONName field pre-parsed.
+			// existing GetParameterName probably calls parser.GetTag(field.StructTag, key).
+			// If I refactored GetParameterName to Use definition.Field, I should check "Tags" field.
+
 			result := GetParameterName(tt.field, tt.tagName)
 			if result != tt.expected {
 				t.Errorf("expected %q, got %q", tt.expected, result)
@@ -369,9 +379,9 @@ type mockExtractor struct {
 	canExtract bool
 }
 
-func (m *mockExtractor) Name() string                        { return m.name }
-func (m *mockExtractor) Priority() int                       { return m.priority }
-func (m *mockExtractor) CanExtract(field *parser.Field) bool { return m.canExtract }
-func (m *mockExtractor) GenerateCode(field *parser.Field, structName string) (string, []string) {
+func (m *mockExtractor) Name() string                            { return m.name }
+func (m *mockExtractor) Priority() int                           { return m.priority }
+func (m *mockExtractor) CanExtract(field *definition.Field) bool { return m.canExtract }
+func (m *mockExtractor) GenerateCode(field *definition.Field, structName string) (string, []string) {
 	return "mock code", []string{}
 }

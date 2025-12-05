@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	coreast "github.com/reation-io/apikit/core/ast"
+	"github.com/reation-io/apikit/core/definition"
 	"github.com/reation-io/apikit/openapi/parsers"
 	"github.com/reation-io/apikit/openapi/spec"
 
@@ -12,9 +12,9 @@ import (
 	_ "github.com/reation-io/apikit/openapi/parsers/tags"
 )
 
-// ExtractFromGeneric extracts OpenAPI specification from generic parse results
+// ExtractFromGeneric extracts OpenAPI specification from definition results
 // This adapter filters for swagger:meta, swagger:route, and swagger:model directives
-func ExtractFromGeneric(results []*coreast.ParseResult) (*spec.OpenAPI, error) {
+func ExtractFromGeneric(results []*definition.Definition) (*spec.OpenAPI, error) {
 	openapi := &spec.OpenAPI{
 		OpenAPI: "3.0.3",
 		Info: &spec.Info{
@@ -27,29 +27,29 @@ func ExtractFromGeneric(results []*coreast.ParseResult) (*spec.OpenAPI, error) {
 	}
 
 	for _, result := range results {
-		// Process swagger:meta
+		// Process swagger:meta (from Types that serve as meta holders)
 		if err := extractMeta(result, openapi); err != nil {
-			return nil, fmt.Errorf("failed to extract meta from %s: %w", result.Filename, err)
+			return nil, fmt.Errorf("failed to extract meta from %s: %w", result.Package, err)
 		}
 
-		// Process swagger:route
+		// Process operations (compiled from functions and structs)
 		if err := extractRoutes(result, openapi); err != nil {
-			return nil, fmt.Errorf("failed to extract routes from %s: %w", result.Filename, err)
+			return nil, fmt.Errorf("failed to extract routes from %s: %w", result.Package, err)
 		}
 
-		// Process swagger:model
+		// Process swagger:model (from Types)
 		if err := extractModels(result, openapi); err != nil {
-			return nil, fmt.Errorf("failed to extract models from %s: %w", result.Filename, err)
+			return nil, fmt.Errorf("failed to extract models from %s: %w", result.Package, err)
 		}
 	}
 
 	return openapi, nil
 }
 
-// ExtractMultipleFromGeneric extracts multiple OpenAPI specifications from generic parse results
+// ExtractMultipleFromGeneric extracts multiple OpenAPI specifications from definition results
 // based on Spec: tags in swagger:meta and swagger:route directives
 // Returns a map of spec name to OpenAPI specification
-func ExtractMultipleFromGeneric(results []*coreast.ParseResult) (map[string]*spec.OpenAPI, error) {
+func ExtractMultipleFromGeneric(results []*definition.Definition) (map[string]*spec.OpenAPI, error) {
 	specs := make(map[string]*spec.OpenAPI)
 
 	// Initialize default spec
@@ -65,10 +65,10 @@ func ExtractMultipleFromGeneric(results []*coreast.ParseResult) (map[string]*spe
 	}
 
 	// First pass: collect all meta blocks and their spec tags
-	metaBySpec := make(map[string][]*coreast.Struct)
+	metaBySpec := make(map[string][]*definition.Type)
 
 	for _, result := range results {
-		for _, s := range result.Structs {
+		for _, s := range result.Types {
 			if !hasDirective(s.Doc, "swagger:meta") {
 				continue
 			}
@@ -141,7 +141,7 @@ func ExtractMultipleFromGeneric(results []*coreast.ParseResult) (map[string]*spe
 	// Third pass: extract models (shared across all specs)
 	allModels := make(map[string]*spec.Schema)
 	for _, result := range results {
-		for _, s := range result.Structs {
+		for _, s := range result.Types {
 			if !hasDirective(s.Doc, "swagger:model") {
 				continue
 			}
@@ -151,7 +151,7 @@ func ExtractMultipleFromGeneric(results []*coreast.ParseResult) (map[string]*spe
 			// Parse field tags
 			for _, field := range s.Fields {
 				if field.Doc != nil || field.Comment != nil {
-					fieldSchema := schema.Properties[getJSONName(field)]
+					fieldSchema := schema.Properties[field.JSONName]
 					if fieldSchema != nil {
 						if field.Doc != nil {
 							parsers.GlobalRegistry().Parse("swagger:model", field.Doc, fieldSchema, parsers.ContextField)
@@ -186,8 +186,8 @@ func ExtractMultipleFromGeneric(results []*coreast.ParseResult) (map[string]*spe
 }
 
 // extractMeta extracts swagger:meta information
-func extractMeta(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
-	for _, s := range result.Structs {
+func extractMeta(result *definition.Definition, openapi *spec.OpenAPI) error {
+	for _, s := range result.Types {
 		if !hasDirective(s.Doc, "swagger:meta") {
 			continue
 		}
@@ -211,31 +211,23 @@ func extractMeta(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
 }
 
 // extractRoutes extracts swagger:route information
-func extractRoutes(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
-	for _, s := range result.Structs {
-		if !hasDirective(s.Doc, "swagger:route") {
-			continue
-		}
-
-		// Parse the route line: swagger:route METHOD PATH TAG OPERATION_ID
-		routeInfo, err := parseRouteLine(s.Doc)
-		if err != nil {
-			return err
-		}
-
-		// Create operation
+func extractRoutes(result *definition.Definition, openapi *spec.OpenAPI) error {
+	for _, op := range result.Operations {
+		// Create operation using data already parsed by core/parser
 		operation := &spec.Operation{
-			OperationID: routeInfo.OperationID,
-			Tags:        []string{routeInfo.Tag},
+			OperationID: op.ID,
+			Tags:        op.Tags,
 			Responses: &spec.Responses{
 				StatusCodeResponses: make(map[string]*spec.Response),
 			},
 		}
 
-		// Parse operation tags
-		if err := parsers.GlobalRegistry().Parse("swagger:route", s.Doc, operation, parsers.ContextRoute); err != nil {
-			if !isInvalidTargetError(err) {
-				return err
+		// Parse additional operation tags from Docs (Summary, Description, Responses, etc.)
+		if op.Doc != nil {
+			if err := parsers.GlobalRegistry().Parse("swagger:route", op.Doc, operation, parsers.ContextRoute); err != nil {
+				if !isInvalidTargetError(err) {
+					return err
+				}
 			}
 		}
 
@@ -245,12 +237,12 @@ func extractRoutes(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
 		}
 
 		// Add operation to path
-		if openapi.Paths.PathItems[routeInfo.Path] == nil {
-			openapi.Paths.PathItems[routeInfo.Path] = &spec.PathItem{}
+		if openapi.Paths.PathItems[op.Path] == nil {
+			openapi.Paths.PathItems[op.Path] = &spec.PathItem{}
 		}
 
-		pathItem := openapi.Paths.PathItems[routeInfo.Path]
-		switch strings.ToUpper(routeInfo.Method) {
+		pathItem := openapi.Paths.PathItems[op.Path]
+		switch strings.ToUpper(op.Method) {
 		case "GET":
 			pathItem.Get = operation
 		case "POST":
@@ -272,31 +264,24 @@ func extractRoutes(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
 }
 
 // extractRoutesMulti extracts swagger:route information and distributes to multiple specs
-func extractRoutesMulti(result *coreast.ParseResult, specs map[string]*spec.OpenAPI) error {
-	for _, s := range result.Structs {
-		if !hasDirective(s.Doc, "swagger:route") {
-			continue
-		}
-
-		// Parse the route line: swagger:route METHOD PATH TAG OPERATION_ID
-		routeInfo, err := parseRouteLine(s.Doc)
-		if err != nil {
-			return err
-		}
+func extractRoutesMulti(result *definition.Definition, specs map[string]*spec.OpenAPI) error {
+	for _, op := range result.Operations {
 
 		// Create operation
 		operation := &spec.Operation{
-			OperationID: routeInfo.OperationID,
-			Tags:        []string{routeInfo.Tag},
+			OperationID: op.ID,
+			Tags:        op.Tags,
 			Responses: &spec.Responses{
 				StatusCodeResponses: make(map[string]*spec.Response),
 			},
 		}
 
 		// Parse operation tags
-		if err := parsers.GlobalRegistry().Parse("swagger:route", s.Doc, operation, parsers.ContextRoute); err != nil {
-			if !isInvalidTargetError(err) {
-				return err
+		if op.Doc != nil {
+			if err := parsers.GlobalRegistry().Parse("swagger:route", op.Doc, operation, parsers.ContextRoute); err != nil {
+				if !isInvalidTargetError(err) {
+					return err
+				}
 			}
 		}
 
@@ -337,15 +322,16 @@ func extractRoutesMulti(result *coreast.ParseResult, specs map[string]*spec.Open
 			targetSpec := specs[specName]
 
 			// Clone operation to avoid sharing references
-			clonedOp := cloneOperationForAdapter(operation)
+			// Reuse internal clone from builder
+			clonedOp := cloneOperation(operation)
 
 			// Add operation to path
-			if targetSpec.Paths.PathItems[routeInfo.Path] == nil {
-				targetSpec.Paths.PathItems[routeInfo.Path] = &spec.PathItem{}
+			if targetSpec.Paths.PathItems[op.Path] == nil {
+				targetSpec.Paths.PathItems[op.Path] = &spec.PathItem{}
 			}
 
-			pathItem := targetSpec.Paths.PathItems[routeInfo.Path]
-			switch strings.ToUpper(routeInfo.Method) {
+			pathItem := targetSpec.Paths.PathItems[op.Path]
+			switch strings.ToUpper(op.Method) {
 			case "GET":
 				pathItem.Get = clonedOp
 			case "POST":
@@ -367,62 +353,9 @@ func extractRoutesMulti(result *coreast.ParseResult, specs map[string]*spec.Open
 	return nil
 }
 
-// cloneOperationForAdapter creates a copy of an operation (without x-specs extension)
-func cloneOperationForAdapter(op *spec.Operation) *spec.Operation {
-	if op == nil {
-		return nil
-	}
-
-	cloned := &spec.Operation{
-		Tags:        make([]string, len(op.Tags)),
-		Summary:     op.Summary,
-		Description: op.Description,
-		OperationID: op.OperationID,
-		Deprecated:  op.Deprecated,
-	}
-
-	copy(cloned.Tags, op.Tags)
-
-	// Clone parameters
-	if op.Parameters != nil {
-		cloned.Parameters = make([]*spec.Parameter, len(op.Parameters))
-		copy(cloned.Parameters, op.Parameters)
-	}
-
-	// Clone request body
-	cloned.RequestBody = op.RequestBody
-
-	// Clone responses
-	if op.Responses != nil {
-		cloned.Responses = &spec.Responses{
-			StatusCodeResponses: make(map[string]*spec.Response),
-			Default:             op.Responses.Default,
-		}
-		for code, resp := range op.Responses.StatusCodeResponses {
-			cloned.Responses.StatusCodeResponses[code] = resp
-		}
-	}
-
-	// Clone security
-	if op.Security != nil {
-		cloned.Security = make([]spec.SecurityRequirement, len(op.Security))
-		copy(cloned.Security, op.Security)
-	}
-
-	// Clone servers
-	if op.Servers != nil {
-		cloned.Servers = make([]*spec.Server, len(op.Servers))
-		copy(cloned.Servers, op.Servers)
-	}
-
-	// Don't copy Extensions (we don't want x-specs in the output)
-
-	return cloned
-}
-
 // extractModels extracts swagger:model information
-func extractModels(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
-	for _, s := range result.Structs {
+func extractModels(result *definition.Definition, openapi *spec.OpenAPI) error {
+	for _, s := range result.Types {
 		if !hasDirective(s.Doc, "swagger:model") {
 			continue
 		}
@@ -431,9 +364,9 @@ func extractModels(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
 		schema := convertStructToSchema(s)
 
 		// Parse field tags
-		for i, field := range s.Fields {
+		for _, field := range s.Fields {
 			if field.Doc != nil || field.Comment != nil {
-				fieldSchema := schema.Properties[getJSONName(field)]
+				fieldSchema := schema.Properties[field.JSONName]
 				if fieldSchema != nil {
 					// Parse field documentation
 					if field.Doc != nil {
@@ -444,7 +377,6 @@ func extractModels(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
 					}
 				}
 			}
-			_ = i // unused
 		}
 
 		// Add to components
@@ -460,65 +392,47 @@ func extractModels(result *coreast.ParseResult, openapi *spec.OpenAPI) error {
 }
 
 // convertStructToSchema converts a generic struct to OpenAPI schema
-func convertStructToSchema(s *coreast.Struct) *spec.Schema {
+func convertStructToSchema(s *definition.Type) *spec.Schema {
 	schema := &spec.Schema{
 		Type:       "object",
 		Properties: make(map[string]*spec.Schema),
 	}
 
 	for _, field := range s.Fields {
-		// Skip embedded fields for now
-		if field.IsEmbedded {
+		if field.JSONName == "-" {
 			continue
 		}
 
-		jsonName := getJSONName(field)
-		if jsonName == "-" {
-			continue
+		name := field.JSONName
+		if name == "" {
+			name = field.Name
 		}
 
-		fieldSchema := typeToSchema(field.Type, field.IsPointer, field.IsSlice)
-		schema.Properties[jsonName] = fieldSchema
+		fieldSchema := typeToSchema(field.Type)
+		schema.Properties[name] = fieldSchema
 	}
 
 	return schema
 }
 
-// getJSONName extracts the JSON name from struct tag
-func getJSONName(field *coreast.Field) string {
-	if field.Tag == "" {
-		return field.Name
-	}
-
-	// Parse json tag
-	tag := field.Tag
-	if idx := strings.Index(tag, "json:"); idx != -1 {
-		rest := tag[idx+5:]
-		rest = strings.TrimPrefix(rest, "\"")
-		if endIdx := strings.Index(rest, "\""); endIdx != -1 {
-			jsonTag := rest[:endIdx]
-			// Split by comma to get just the name
-			parts := strings.Split(jsonTag, ",")
-			if len(parts) > 0 && parts[0] != "" {
-				return parts[0]
-			}
-		}
-	}
-
-	return field.Name
-}
-
 // typeToSchema converts a Go type to OpenAPI schema
-func typeToSchema(goType string, isPointer bool, isSlice bool) *spec.Schema {
+func typeToSchema(t *definition.Type) *spec.Schema {
+	if t.GoType == "" {
+		return &spec.Schema{Type: "string"}
+	}
+
+	goType := t.GoType
+
 	// Remove pointer prefix
 	goType = strings.TrimPrefix(goType, "*")
 
 	// Handle slices
-	if isSlice {
+	if strings.HasPrefix(goType, "[]") {
 		elemType := strings.TrimPrefix(goType, "[]")
+		// simplified recursion
 		return &spec.Schema{
 			Type:  "array",
-			Items: typeToSchema(elemType, false, false),
+			Items: typeToSchema(&definition.Type{GoType: elemType}),
 		}
 	}
 
@@ -552,7 +466,7 @@ func hasMultipartFormData(operation *spec.Operation) bool {
 }
 
 // generateMultipartRequestBody generates multipart/form-data schema from struct fields
-func generateMultipartRequestBody(operation *spec.Operation, result *coreast.ParseResult) {
+func generateMultipartRequestBody(operation *spec.Operation, result *definition.Definition) {
 	if operation.RequestBody == nil || operation.RequestBody.Content["multipart/form-data"] == nil {
 		return
 	}
@@ -561,15 +475,15 @@ func generateMultipartRequestBody(operation *spec.Operation, result *coreast.Par
 	requiredMap := make(map[string]bool)
 
 	// Iterate through all structs to find form fields
-	for _, s := range result.Structs {
+	for _, s := range result.Types {
 		for _, field := range s.Fields {
 			// Check if field has form tag or in:form comment
 			isFormField := false
 			formName := ""
 
 			// Check for form tag
-			if field.Tag != "" {
-				tag := strings.Trim(field.Tag, "`")
+			if field.Tags != "" {
+				tag := strings.Trim(field.Tags, "`")
 				if strings.Contains(tag, "form:") {
 					isFormField = true
 					// Extract form name from tag
@@ -603,11 +517,11 @@ func generateMultipartRequestBody(operation *spec.Operation, result *coreast.Par
 			}
 
 			// Detect file upload fields
-			isFile := field.Type == "*multipart.FileHeader" || field.Type == "[]*multipart.FileHeader"
+			isFile := strings.Contains(field.Type.GoType, "multipart.FileHeader")
 
 			if isFile {
 				// File upload field
-				if strings.HasPrefix(field.Type, "[]") {
+				if strings.HasPrefix(field.Type.GoType, "[]") {
 					// Multiple files
 					properties[formName] = &spec.Schema{
 						Type: "array",
@@ -624,13 +538,13 @@ func generateMultipartRequestBody(operation *spec.Operation, result *coreast.Par
 					}
 				}
 			} else {
-				// Regular form field - infer type from Go type
-				properties[formName] = typeToSchema(field.Type, strings.HasPrefix(field.Type, "*"), strings.HasPrefix(field.Type, "[]"))
+				// Regular form field
+				properties[formName] = typeToSchema(field.Type)
 			}
 
 			// Check if required (validate tag)
-			if field.Tag != "" {
-				tag := strings.Trim(field.Tag, "`")
+			if field.Tags != "" {
+				tag := strings.Trim(field.Tags, "`")
 				if strings.Contains(tag, "validate:") {
 					validateTag := extractTagValue(tag, "validate")
 					if strings.Contains(validateTag, "required") {

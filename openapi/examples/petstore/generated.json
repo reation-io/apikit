@@ -3,8 +3,21 @@
   "info": {
     "title": "Swagger Petstore - OpenAPI 3.0",
     "description": "This is a sample Pet Store Server based on the OpenAPI 3.0 specification.  You can find out more about\nSwagger at [https://swagger.io](https://swagger.io). In the third iteration of the pet store, we've switched to the design first approach!\nYou can now help us improve the API whether it's by making changes to the definition itself or to the code.\nThat way, with time, we can improve the API in general, and expose some of the new features in OAS3.\n\nSome useful links:\n- [The Pet Store repository](https://github.com/swagger-api/swagger-petstore)\n- [The source API definition for the Pet Store](https://github.com/swagger-api/swagger-petstore/blob/master/src/main/resources/openapi.yaml)",
+    "termsOfService": "https://swagger.io/terms/",
+    "contact": {
+      "email": "apiteam@swagger.io"
+    },
+    "license": {
+      "name": "Apache 2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
+    },
     "version": "1.0.12"
   },
+  "servers": [
+    {
+      "url": "https://petstore3.swagger.io/api/v3"
+    }
+  ],
   "paths": {
     "/pet": {
       "put": {
@@ -12,8 +25,28 @@
           "pet"
         ],
         "summary": "Update an existing pet.",
-        "description": "Update an existing pet by Id.\n",
+        "description": "Update an existing pet by Id.",
         "operationId": "updatePet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Pet"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Pet"
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/Pet"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -80,8 +113,28 @@
           "pet"
         ],
         "summary": "Add a new pet to the store.",
-        "description": "Add a new pet to the store.\n",
+        "description": "Add a new pet to the store.",
         "operationId": "addPet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Pet"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Pet"
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/Pet"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -140,8 +193,24 @@
           "pet"
         ],
         "summary": "Finds Pets by status.",
-        "description": "Multiple status values can be provided with comma separated strings.\n",
+        "description": "Multiple status values can be provided with comma separated strings.",
         "operationId": "findPetsByStatus",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Status values that need to be considered for filter",
+            "schema": {
+              "type": "string",
+              "default": "available",
+              "enum": [
+                "available",
+                "pending",
+                "sold"
+              ]
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -190,8 +259,21 @@
           "pet"
         ],
         "summary": "Finds Pets by tags.",
-        "description": "Multiple tags can be provided with comma separated strings. Use tag1, tag2, tag3 for testing.\n",
+        "description": "Multiple tags can be provided with comma separated strings. Use tag1, tag2, tag3 for testing.",
         "operationId": "findPetsByTags",
+        "parameters": [
+          {
+            "name": "tags",
+            "in": "query",
+            "description": "Tags to filter by",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -240,8 +322,20 @@
           "pet"
         ],
         "summary": "Find pet by ID.",
-        "description": "Returns a single pet.\n",
+        "description": "Returns a single pet.",
         "operationId": "getPetById",
+        "parameters": [
+          {
+            "name": "petId",
+            "in": "path",
+            "description": "ID of pet to return",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -301,8 +395,36 @@
           "pet"
         ],
         "summary": "Updates a pet in the store with form data.",
-        "description": "Updates a pet resource based on the form data.\n",
+        "description": "Updates a pet resource based on the form data.",
         "operationId": "updatePetWithForm",
+        "parameters": [
+          {
+            "name": "petId",
+            "in": "path",
+            "description": "ID of pet that needs to be updated",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "description": "Name of pet that needs to be updated",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Status of pet that needs to be updated",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -349,8 +471,28 @@
           "pet"
         ],
         "summary": "Deletes a pet.",
-        "description": "Delete a pet.\n",
+        "description": "Delete a pet.",
         "operationId": "deletePet",
+        "parameters": [
+          {
+            "name": "api_key",
+            "in": "header",
+            "description": "API key",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "petId",
+            "in": "path",
+            "description": "Pet id to delete",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -399,8 +541,28 @@
           "pet"
         ],
         "summary": "Uploads an image.",
-        "description": "Upload image of the pet.\n",
+        "description": "Upload image of the pet.",
         "operationId": "uploadFile",
+        "parameters": [
+          {
+            "name": "petId",
+            "in": "path",
+            "description": "ID of pet to update",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "additionalMetadata",
+            "in": "query",
+            "description": "Additional Metadata",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -459,7 +621,7 @@
           "store"
         ],
         "summary": "Returns pet inventories by status.",
-        "description": "Returns a map of status codes to quantities.\n",
+        "description": "Returns a map of status codes to quantities.",
         "operationId": "getInventory",
         "responses": {
           "200": {
@@ -496,8 +658,28 @@
           "store"
         ],
         "summary": "Place an order for a pet.",
-        "description": "Place a new order in the store.\n",
+        "description": "Place a new order in the store.",
         "operationId": "placeOrder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Order"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Order"
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "$ref": "#/components/schemas/Order"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -548,8 +730,20 @@
           "store"
         ],
         "summary": "Find purchase order by ID.",
-        "description": "For valid response try integer IDs with value \u003c= 5 or \u003e 10. Other values will generate exceptions.\n",
+        "description": "For valid response try integer IDs with value \u003c= 5 or \u003e 10. Other values will generate exceptions.",
         "operationId": "getOrderById",
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "description": "ID of order that needs to be fetched",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -598,8 +792,20 @@
           "store"
         ],
         "summary": "Delete purchase order by identifier.",
-        "description": "For valid response try integer IDs with value \u003c 1000. Anything above 1000 or nonintegers will generate API errors.\n",
+        "description": "For valid response try integer IDs with value \u003c 1000. Anything above 1000 or nonintegers will generate API errors.",
         "operationId": "deleteOrder",
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "description": "ID of the order that needs to be deleted",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -649,9 +855,15 @@
     "schemas": {
       "ApiResponse": {
         "type": "object",
+        "required": [
+          "code",
+          "type",
+          "message"
+        ],
         "properties": {
           "code": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int32"
           },
           "message": {
             "type": "string"
@@ -663,9 +875,14 @@
       },
       "Category": {
         "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
         "properties": {
           "id": {
             "type": "integer",
+            "format": "int64",
             "example": 1
           },
           "name": {
@@ -676,6 +893,10 @@
       },
       "Error": {
         "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
         "properties": {
           "code": {
             "type": "string"
@@ -690,20 +911,28 @@
       },
       "Order": {
         "type": "object",
+        "required": [
+          "id",
+          "petId",
+          "quantity"
+        ],
         "properties": {
           "complete": {
             "type": "boolean"
           },
           "id": {
             "type": "integer",
+            "format": "int64",
             "example": 10
           },
           "petId": {
             "type": "integer",
+            "format": "int64",
             "example": 198772
           },
           "quantity": {
             "type": "integer",
+            "format": "int32",
             "example": 7
           },
           "shipDate": {
@@ -717,12 +946,19 @@
       },
       "Pet": {
         "type": "object",
+        "required": [
+          "id",
+          "name",
+          "photoUrls"
+        ],
         "properties": {
           "category": {
-            "type": "object"
+            "$ref": "#/components/schemas/Category",
+            "nullable": true
           },
           "id": {
             "type": "integer",
+            "format": "int64",
             "example": 10
           },
           "name": {
@@ -741,7 +977,7 @@
           "tags": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/Tag"
             }
           }
         }
@@ -751,6 +987,9 @@
       },
       "SuccessResponse": {
         "type": "object",
+        "required": [
+          "message"
+        ],
         "properties": {
           "message": {
             "type": "string"
@@ -759,9 +998,14 @@
       },
       "Tag": {
         "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "format": "int64"
           },
           "name": {
             "type": "string"
@@ -770,6 +1014,16 @@
       },
       "User": {
         "type": "object",
+        "required": [
+          "id",
+          "username",
+          "firstName",
+          "lastName",
+          "email",
+          "password",
+          "phone",
+          "userStatus"
+        ],
         "properties": {
           "email": {
             "type": "string",
@@ -781,6 +1035,7 @@
           },
           "id": {
             "type": "integer",
+            "format": "int64",
             "example": 10
           },
           "lastName": {
@@ -797,6 +1052,7 @@
           },
           "userStatus": {
             "type": "integer",
+            "format": "int32",
             "example": 1
           },
           "username": {
@@ -805,6 +1061,51 @@
           }
         }
       }
+    },
+    "securitySchemes": {
+      "api_key": {
+        "type": "apiKey",
+        "name": "api_key",
+        "in": "header"
+      },
+      "petstore_auth": {
+        "type": "oauth2",
+        "flows": {
+          "implicit": {
+            "authorizationUrl": "https://petstore3.swagger.io/oauth/authorize",
+            "scopes": {
+              "read:pets": "read your pets",
+              "write:pets": "modify pets in your account"
+            }
+          }
+        }
+      }
     }
+  },
+  "tags": [
+    {
+      "name": "pet",
+      "description": "Everything about your Pets",
+      "externalDocs": {
+        "description": "Find out more",
+        "url": "https://swagger.io"
+      }
+    },
+    {
+      "name": "store",
+      "description": "Access to Petstore orders",
+      "externalDocs": {
+        "description": "Find out more about our store",
+        "url": "https://swagger.io"
+      }
+    },
+    {
+      "name": "user",
+      "description": "Operations about user"
+    }
+  ],
+  "externalDocs": {
+    "description": "Find out more",
+    "url": "https://swagger.io"
   }
 }

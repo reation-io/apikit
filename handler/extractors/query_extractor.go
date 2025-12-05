@@ -3,7 +3,9 @@ package extractors
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
+	"github.com/reation-io/apikit/core/definition"
 	"github.com/reation-io/apikit/handler/parser"
 )
 
@@ -22,28 +24,31 @@ func (e *QueryExtractor) Priority() int {
 	return 20 // Extract query params after path
 }
 
-func (e *QueryExtractor) CanExtract(field *parser.Field) bool {
-	// Check if field has query tag
-	if field.StructTag != "" {
-		tag := reflect.StructTag(field.StructTag)
+func (e *QueryExtractor) CanExtract(field *definition.Field) bool {
+	// check existing tags in field.Tags
+	if field.Tags != "" {
+		tag := reflect.StructTag(field.Tags)
 		if _, ok := tag.Lookup(parser.TagQuery); ok {
 			return true
 		}
 	}
-	// Check if field is marked with // in:query comment
-	return field.InComment == parser.SourceQuery
+	// check metadata for "in"
+	return field.Metadata["in"] == parser.SourceQuery
 }
 
-func (e *QueryExtractor) GenerateCode(field *parser.Field, structName string) (string, []string) {
+func (e *QueryExtractor) GenerateCode(field *definition.Field, structName string) (string, []string) {
 	paramName := GetParameterName(field, parser.TagQuery)
 	fieldName := field.Name
 	typeName := GetBaseType(field)
 
 	// For slices, get all values using []
 	// Example: ?tags=go&tags=api&tags=http → []string{"go", "api", "http"}
-	if field.IsSlice {
+	// We check for slice by checking if GoType starts with []
+	if strings.HasPrefix(field.Type.GoType, "[]") {
+		// Slice type logic
+		sliceType := field.Type.GoType[2:] // remove []
 		varName := fmt.Sprintf(`r.URL.Query()["%s"]`, paramName)
-		return GenerateSliceCodeByType(varName, fieldName, field.SliceType, field)
+		return GenerateSliceCodeByType(varName, fieldName, sliceType, field)
 	}
 
 	// For single values, use .Get()

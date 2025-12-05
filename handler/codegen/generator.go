@@ -11,8 +11,8 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/reation-io/apikit/core/definition"
 	"github.com/reation-io/apikit/handler/extractors"
-	"github.com/reation-io/apikit/handler/parser"
 	"golang.org/x/tools/imports"
 )
 
@@ -63,14 +63,14 @@ type HandlerData struct {
 	MaxMemory         int64 // Max memory for multipart form parsing (default 32MB)
 }
 
-// Generate creates wrapper code for the given handlers
-func (g *Generator) Generate(result *parser.ParseResult) ([]byte, error) {
-	if len(result.Handlers) == 0 {
+// Generate creates wrapper code for the given API definition
+func (g *Generator) Generate(def *definition.Definition) ([]byte, error) {
+	if len(def.Operations) == 0 {
 		return nil, fmt.Errorf("no handlers found")
 	}
 
 	// Prepare template data using extractors
-	data := g.prepareTemplateData(result)
+	data := g.prepareTemplateData(def)
 
 	// Execute template
 	var buf bytes.Buffer
@@ -93,9 +93,9 @@ func (g *Generator) Generate(result *parser.ParseResult) ([]byte, error) {
 	return formatted, nil
 }
 
-func (g *Generator) prepareTemplateData(result *parser.ParseResult) *TemplateData {
+func (g *Generator) prepareTemplateData(def *definition.Definition) *TemplateData {
 	data := &TemplateData{
-		PackageName: result.Source.Package,
+		PackageName: def.Package,
 		Imports:     []string{},
 		Handlers:    []HandlerData{},
 	}
@@ -105,8 +105,8 @@ func (g *Generator) prepareTemplateData(result *parser.ParseResult) *TemplateDat
 	// Always add apikit import since we use it for error handling
 	importsMap["github.com/reation-io/apikit"] = true
 
-	for _, handler := range result.Handlers {
-		hd := g.prepareHandlerData(&handler, importsMap)
+	for _, op := range def.Operations {
+		hd := g.prepareHandlerData(op, def, importsMap)
 		data.Handlers = append(data.Handlers, hd)
 	}
 
@@ -119,97 +119,101 @@ func (g *Generator) prepareTemplateData(result *parser.ParseResult) *TemplateDat
 	return data
 }
 
-func (g *Generator) prepareHandlerData(handler *parser.Handler, importsMap map[string]bool) HandlerData {
+func (g *Generator) prepareHandlerData(op *definition.Operation, def *definition.Definition, importsMap map[string]bool) HandlerData {
 	hd := HandlerData{
-		Name:              handler.Name,
-		WrapperName:       toCamelCasePrivate(handler.Name) + "APIKit",
-		ParseFuncName:     "parse" + capitalize(handler.Name) + "Request",
-		ParamType:         handler.ParamType,
-		ReturnType:        handler.ReturnType,
-		HasResponseWriter: handler.HasResponseWriter,
-		HasRequest:        handler.HasRequest,
+		Name:          op.ID,
+		WrapperName:   toCamelCasePrivate(op.ID) + "APIKit",
+		ParseFuncName: "parse" + capitalize(op.ID) + "Request",
+		ParamType:     op.RequestType,
+		ReturnType:    op.ReturnType,
 	}
 
-	if handler.Struct == nil {
+	// If no request struct, we are done
+	if op.RequestType == "" {
+		return hd
+	}
+
+	reqType, ok := def.Types[op.RequestType]
+	if !ok {
 		return hd
 	}
 
 	// Use extractors to generate code for each field
-	extractionCode := g.generateExtractionCode(handler.Struct, importsMap)
+	extractionCode := g.generateExtractionCode(reqType, op.ID, importsMap)
 
 	hd.HasExtractionCode = extractionCode != ""
 	hd.ExtractionCode = extractionCode
 
-	// Check if we need body parsing and find the body field name
-	hd.HasBody = g.hasBodyFields(handler.Struct)
+	// Check for body fields
+	hd.HasBody = g.hasBodyFields(reqType)
 	if hd.HasBody {
-		bodyField := g.findBodyField(handler.Struct)
+		bodyField := g.findBodyField(reqType)
 		if bodyField != "" {
 			hd.BodyFieldName = bodyField
 		}
 	}
 
-	// Check if there's a RawBody field
-	rawBodyField := g.findRawBodyField(handler.Struct)
+	// Check for RawBody
+	rawBodyField := g.findRawBodyField(reqType)
 	if rawBodyField != "" {
 		hd.HasRawBody = true
 		hd.RawBodyFieldName = rawBodyField
 	}
 
-	// Check if validation is needed
-	hd.HasValidation = g.hasValidationTags(handler.Struct)
+	// Check validation
+	hd.HasValidation = g.hasValidationTags(reqType)
 	if hd.HasValidation {
-		// Add validator import
 		importsMap["github.com/reation-io/apikit/validator"] = true
 	}
 
-	// Check if multipart form parsing is needed
-	hd.HasMultipartForm = g.hasMultipartFormFields(handler.Struct)
+	// Check multipart
+	hd.HasMultipartForm = g.hasMultipartFormFields(reqType)
 	if hd.HasMultipartForm {
 		hd.MaxMemory = 32 << 20 // 32MB default
+	}
+
+	// Check for special fields in the struct (Request/ResponseWriter)
+	// Some patterns put them in the struct.
+	for _, f := range reqType.Fields {
+		if f.Type.GoType == "*http.Request" {
+			hd.HasRequest = true
+		}
+		if f.Type.GoType == "http.ResponseWriter" {
+			hd.HasResponseWriter = true
+		}
 	}
 
 	return hd
 }
 
-func (g *Generator) generateExtractionCode(s *parser.Struct, importsMap map[string]bool) string {
+func (g *Generator) generateExtractionCode(t *definition.Type, structName string, importsMap map[string]bool) string {
 	var lines []string
 
-	// Get all registered extractors (already sorted by priority)
 	allExtractors := extractors.GetExtractors()
 
-	// Process each field
-	for _, field := range s.Fields {
-		// Handle embedded structs - expand their fields
-		if field.IsEmbedded {
-			if field.NestedStruct != nil {
-				nestedCode := g.generateExtractionCode(field.NestedStruct, importsMap)
-				if nestedCode != "" {
-					lines = append(lines, nestedCode)
-				}
-			}
+	for _, field := range t.Fields {
+		// handle embedded fields if Type.Kind == "struct" and it has no name?
+		// for now skip complex embedded logic unless explicit
+
+		// Skip special/body fields handled separately
+		if field.Name == "Body" && field.Type.GoType == "[]byte" {
+			continue
+		} // RawBody
+		if field.Type.GoType == "*http.Request" || field.Type.GoType == "http.ResponseWriter" {
 			continue
 		}
 
-		// Skip RawBody field (handled separately in template)
-		if field.IsRawBody {
-			continue
-		}
-
-		// Find the appropriate extractor for this field
+		// Find extractor
 		for _, ext := range allExtractors {
-			if ext.CanExtract(&field) {
-				code, imports := ext.GenerateCode(&field, s.Name)
+			if ext.CanExtract(field) {
+				code, imports := ext.GenerateCode(field, structName)
 				if code != "" {
-					// Add imports
 					for _, imp := range imports {
 						importsMap[imp] = true
 					}
-
-					// Add code (extractors are already sorted by priority)
 					lines = append(lines, code)
 				}
-				break // Only use the first matching extractor
+				break
 			}
 		}
 	}
@@ -217,52 +221,34 @@ func (g *Generator) generateExtractionCode(s *parser.Struct, importsMap map[stri
 	return strings.Join(lines, "\n\t")
 }
 
-func (g *Generator) hasBodyFields(s *parser.Struct) bool {
-	for _, field := range s.Fields {
-		// Check embedded structs recursively
-		if field.IsEmbedded && field.NestedStruct != nil {
-			if g.hasBodyFields(field.NestedStruct) {
-				return true
-			}
-		}
-
-		// Field is a body field if:
-		// 1. It has IsBody = true (from "in: body" comment), OR
-		// 2. It has json:"body" tag
-		if field.IsBody {
+func (g *Generator) hasBodyFields(t *definition.Type) bool {
+	for _, field := range t.Fields {
+		if field.Metadata["in"] == "body" {
 			return true
 		}
-
-		if field.StructTag != "" {
-			tag := reflect.StructTag(field.StructTag)
-			if jsonTag, ok := tag.Lookup("json"); ok && jsonTag == "body" {
+		if field.Tags != "" {
+			tag := reflect.StructTag(field.Tags)
+			if val, ok := tag.Lookup("json"); ok && val == "body" {
 				return true
 			}
 		}
+
+		// Also BodyExtractor knows. But we are here just checking flags.
+		if field.Name == "Body" && field.Type.GoType == "[]byte" {
+			return false
+		} // RawBody is separate
 	}
 	return false
 }
 
-// findBodyField searches for a body field in the struct
-// Returns the field name if found, empty string otherwise
-func (g *Generator) findBodyField(s *parser.Struct) string {
-	for _, field := range s.Fields {
-		// Check embedded structs recursively
-		if field.IsEmbedded && field.NestedStruct != nil {
-			if bodyField := g.findBodyField(field.NestedStruct); bodyField != "" {
-				return bodyField
-			}
-		}
-
-		// Check if this is a body field
-		if field.IsBody {
+func (g *Generator) findBodyField(t *definition.Type) string {
+	for _, field := range t.Fields {
+		if field.Metadata["in"] == "body" {
 			return field.Name
 		}
-
-		// Check if field has json:"body" tag
-		if field.StructTag != "" {
-			tag := reflect.StructTag(field.StructTag)
-			if jsonTag, ok := tag.Lookup("json"); ok && jsonTag == "body" {
+		if field.Tags != "" {
+			tag := reflect.StructTag(field.Tags)
+			if val, ok := tag.Lookup("json"); ok && val == "body" {
 				return field.Name
 			}
 		}
@@ -270,40 +256,19 @@ func (g *Generator) findBodyField(s *parser.Struct) string {
 	return ""
 }
 
-// findRawBodyField searches for a RawBody field ([]byte) in the struct
-// Returns the field name if found, empty string otherwise
-func (g *Generator) findRawBodyField(s *parser.Struct) string {
-	for _, field := range s.Fields {
-		// Check embedded structs recursively
-		if field.IsEmbedded && field.NestedStruct != nil {
-			if rawBodyField := g.findRawBodyField(field.NestedStruct); rawBodyField != "" {
-				return rawBodyField
-			}
-		}
-
-		// Check if this is a RawBody field
-		// More flexible detection: any field with type []byte that contains "body" (case-insensitive)
-		if field.IsRawBody {
+func (g *Generator) findRawBodyField(t *definition.Type) string {
+	for _, field := range t.Fields {
+		if field.Type.GoType == "[]byte" && (field.Name == "Body" || strings.Contains(strings.ToLower(field.Name), "rawbody")) {
 			return field.Name
 		}
 	}
 	return ""
 }
 
-// hasValidationTags checks if the struct has any validation tags
-// Returns true if any field has a validate tag
-func (g *Generator) hasValidationTags(s *parser.Struct) bool {
-	for _, field := range s.Fields {
-		// Check embedded structs recursively
-		if field.IsEmbedded && field.NestedStruct != nil {
-			if g.hasValidationTags(field.NestedStruct) {
-				return true
-			}
-		}
-
-		// Check if this field has a validate tag
-		if field.StructTag != "" {
-			tag := reflect.StructTag(field.StructTag)
+func (g *Generator) hasValidationTags(t *definition.Type) bool {
+	for _, field := range t.Fields {
+		if field.Tags != "" {
+			tag := reflect.StructTag(field.Tags)
 			if _, ok := tag.Lookup("validate"); ok {
 				return true
 			}
@@ -312,32 +277,18 @@ func (g *Generator) hasValidationTags(s *parser.Struct) bool {
 	return false
 }
 
-// hasMultipartFormFields checks if the struct has any multipart form fields
-// Returns true if any field has a form tag or is a file upload field
-func (g *Generator) hasMultipartFormFields(s *parser.Struct) bool {
-	for _, field := range s.Fields {
-		// Check embedded structs recursively
-		if field.IsEmbedded && field.NestedStruct != nil {
-			if g.hasMultipartFormFields(field.NestedStruct) {
-				return true
-			}
-		}
-
-		// Check if this is a file field
-		if field.IsFile {
+func (g *Generator) hasMultipartFormFields(t *definition.Type) bool {
+	for _, field := range t.Fields {
+		if field.Metadata["in"] == "form" {
 			return true
 		}
-
-		// Check if this field has a form tag
-		if field.StructTag != "" {
-			tag := reflect.StructTag(field.StructTag)
+		if field.Tags != "" {
+			tag := reflect.StructTag(field.Tags)
 			if _, ok := tag.Lookup("form"); ok {
 				return true
 			}
 		}
-
-		// Check if field is marked with // in:form comment
-		if field.InComment == "form" {
+		if strings.Contains(field.Type.GoType, "multipart.FileHeader") {
 			return true
 		}
 	}
@@ -353,25 +304,25 @@ func templateFuncs() template.FuncMap {
 }
 
 // toCamelCasePrivate converts a string to camelCase with first letter lowercase
-// Example: "GetUser" -> "getUser", "SearchUsers" -> "searchUsers"
 func toCamelCasePrivate(s string) string {
 	if s == "" {
 		return s
 	}
-	// Convert first character to lowercase
 	runes := []rune(s)
-	runes[0] = []rune(strings.ToLower(string(runes[0])))[0]
+	if len(runes) > 0 {
+		runes[0] = []rune(strings.ToLower(string(runes[0])))[0]
+	}
 	return string(runes)
 }
 
 // capitalize converts the first letter to uppercase (PascalCase)
-// Example: "listTransactions" -> "ListTransactions", "getUser" -> "GetUser"
 func capitalize(s string) string {
 	if s == "" {
 		return s
 	}
-	// Convert first character to uppercase
 	runes := []rune(s)
-	runes[0] = []rune(strings.ToUpper(string(runes[0])))[0]
+	if len(runes) > 0 {
+		runes[0] = []rune(strings.ToUpper(string(runes[0])))[0]
+	}
 	return string(runes)
 }

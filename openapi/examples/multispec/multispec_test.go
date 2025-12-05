@@ -5,7 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	coreast "github.com/reation-io/apikit/core/ast"
+	"github.com/reation-io/apikit/core/definition"
+	"github.com/reation-io/apikit/core/parser"
 	"github.com/reation-io/apikit/openapi/builder"
 	"gopkg.in/yaml.v3"
 )
@@ -18,14 +19,14 @@ func TestMultiSpecGeneration(t *testing.T) {
 	}
 
 	// Parse the file
-	parser := coreast.NewCachedParser()
-	result, err := parser.Parse(handlersPath)
+	p := parser.New()
+	result, err := p.ParseFile(handlersPath)
 	if err != nil {
 		t.Fatalf("Failed to parse handlers.go: %v", err)
 	}
 
 	// Extract multiple specs
-	specs, err := builder.ExtractMultipleFromGeneric([]*coreast.ParseResult{result})
+	specs, err := builder.ExtractMultipleFromGeneric([]*definition.Definition{result})
 	if err != nil {
 		t.Fatalf("Failed to extract specs: %v", err)
 	}
@@ -185,14 +186,14 @@ func TestMultiSpecGeneration_YAMLOutput(t *testing.T) {
 	}
 
 	// Parse the file
-	parser := coreast.NewCachedParser()
-	result, err := parser.Parse(handlersPath)
+	p := parser.New()
+	result, err := p.ParseFile(handlersPath)
 	if err != nil {
 		t.Fatalf("Failed to parse handlers.go: %v", err)
 	}
 
 	// Extract multiple specs
-	specs, err := builder.ExtractMultipleFromGeneric([]*coreast.ParseResult{result})
+	specs, err := builder.ExtractMultipleFromGeneric([]*definition.Definition{result})
 	if err != nil {
 		t.Fatalf("Failed to extract specs: %v", err)
 	}

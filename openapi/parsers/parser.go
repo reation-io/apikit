@@ -13,6 +13,7 @@ const (
 	ContextModel     ParseContext = "model"     // swagger:model
 	ContextField     ParseContext = "field"     // Field comments
 	ContextParameter ParseContext = "parameter" // swagger:parameters
+	ContextEnum      ParseContext = "enum"      // swagger:enum
 )
 
 // TagParser is the base interface for all tag/directive parsers

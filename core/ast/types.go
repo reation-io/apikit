@@ -30,6 +30,41 @@ type ParseResult struct {
 
 	// FileSet is the token file set for position information
 	FileSet *token.FileSet
+	// Constants contains all constant declarations found in the file
+	Constants []*Constant
+
+	// Types contains all type declarations (including non-structs)
+	Types map[string]*TypeDecl
+}
+
+// TypeDecl represents a generic type declaration
+type TypeDecl struct {
+	Name     string
+	TypeSpec *ast.TypeSpec
+	Doc      *ast.CommentGroup
+	Comment  *ast.CommentGroup
+	Pos      token.Position
+}
+
+// Constant represents a constant declaration
+type Constant struct {
+	// Name is the constant name
+	Name string
+
+	// Type is the constant type (if specified)
+	Type string
+
+	// Value is the constant value
+	Value any
+
+	// Doc contains documentation comments above the constant
+	Doc *ast.CommentGroup
+
+	// Comment contains comments on the same line as the constant
+	Comment *ast.CommentGroup
+
+	// Position in source file
+	Pos token.Position
 }
 
 // Struct represents a struct type with all its information
@@ -156,4 +191,3 @@ type Import struct {
 	// Comment contains comments on the same line as the import
 	Comment *ast.CommentGroup
 }
-

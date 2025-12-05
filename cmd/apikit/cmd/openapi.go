@@ -7,7 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	coreast "github.com/reation-io/apikit/core/ast"
+	"github.com/reation-io/apikit/core/definition"
+	"github.com/reation-io/apikit/core/parser"
 	"github.com/reation-io/apikit/openapi/builder"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -111,21 +112,22 @@ func runOpenAPI(cmd *cobra.Command, args []string) error {
 		log.Printf("Processing %d file(s)...", len(resolvedFiles))
 	}
 
-	// Parse all files with generic parser
-	genericParser := coreast.NewCachedParser()
-	var parseResults []*coreast.ParseResult
+	// Parse all files with core parser
+	var definitions []*definition.Definition
 
 	for i, sourceFilePath := range resolvedFiles {
 		if verbose {
 			log.Printf("[%d/%d] Parsing %s", i+1, len(resolvedFiles), sourceFilePath)
 		}
 
-		result, err := genericParser.Parse(sourceFilePath)
+		// Create a fresh parser for each file to isolate definitions
+		p := parser.New()
+		def, err := p.ParseFile(sourceFilePath)
 		if err != nil {
 			return fmt.Errorf("parsing %s: %w", sourceFilePath, err)
 		}
 
-		parseResults = append(parseResults, result)
+		definitions = append(definitions, def)
 	}
 
 	// Extract OpenAPI specification(s)
@@ -135,7 +137,7 @@ func runOpenAPI(cmd *cobra.Command, args []string) error {
 			log.Println("Extracting multiple OpenAPI specifications...")
 		}
 
-		specs, err := builder.ExtractMultipleFromGeneric(parseResults)
+		specs, err := builder.ExtractMultipleFromGeneric(definitions)
 		if err != nil {
 			return fmt.Errorf("extracting OpenAPI specs: %w", err)
 		}
@@ -207,7 +209,7 @@ func runOpenAPI(cmd *cobra.Command, args []string) error {
 			log.Println("Extracting OpenAPI specification...")
 		}
 
-		spec, err := builder.ExtractFromGeneric(parseResults)
+		spec, err := builder.ExtractFromGeneric(definitions)
 		if err != nil {
 			return fmt.Errorf("extracting OpenAPI spec: %w", err)
 		}
