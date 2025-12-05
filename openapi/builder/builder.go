@@ -468,48 +468,9 @@ func (b *Builder) parseFieldType(expr ast.Expr) *spec.Schema {
 		}
 
 		// Basic types with format
-		switch t.Name {
-		case "string":
-			schema.Type = "string"
-		case "int":
-			schema.Type = "integer"
-		case "int8":
-			schema.Type = "integer"
-			schema.Format = "int8"
-		case "int16":
-			schema.Type = "integer"
-			schema.Format = "int16"
-		case "int32":
-			schema.Type = "integer"
-			schema.Format = "int32"
-		case "int64":
-			schema.Type = "integer"
-			schema.Format = "int64"
-		case "uint":
-			schema.Type = "integer"
-		case "uint8":
-			schema.Type = "integer"
-			schema.Format = "uint8"
-		case "uint16":
-			schema.Type = "integer"
-			schema.Format = "uint16"
-		case "uint32":
-			schema.Type = "integer"
-			schema.Format = "uint32"
-		case "uint64":
-			schema.Type = "integer"
-			schema.Format = "uint64"
-		case "float32":
-			schema.Type = "number"
-			schema.Format = "float"
-		case "float64":
-			schema.Type = "number"
-			schema.Format = "double"
-		case "bool":
-			schema.Type = "boolean"
-		default:
-			schema.Type = "object"
-		}
+		mapping := MapGoTypeToOpenAPI(t.Name)
+		schema.Type = mapping.Type
+		schema.Format = mapping.Format
 
 	case *ast.ArrayType:
 		schema.Type = "array"
@@ -532,12 +493,14 @@ func (b *Builder) parseFieldType(expr ast.Expr) *spec.Schema {
 			}
 		}
 
-		// External type (e.g., time.Time)
-		if ident, ok := t.X.(*ast.Ident); ok {
-			if ident.Name == "time" && t.Sel.Name == "Time" {
-				schema.Type = "string"
-				schema.Format = "date-time"
+		// Check for registered type processors (e.g. time.Time, uuid.UUID)
+		tempInfo := spec.NewFieldInfo()
+		if ProcessTypeWithProcessors(tempInfo, expr) {
+			schema.Type = tempInfo.Type
+			if format, ok := tempInfo.Validations["format"]; ok {
+				schema.Format = format
 			}
+			return schema
 		}
 
 	case *ast.MapType:

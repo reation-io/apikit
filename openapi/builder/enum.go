@@ -117,19 +117,12 @@ func getEnumBaseType(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:
 		// Map Go types to JSON Schema types
-		switch t.Name {
-		case "string":
-			return "string"
-		case "int", "int8", "int16", "int32", "int64",
-			"uint", "uint8", "uint16", "uint32", "uint64":
-			return "integer"
-		case "float32", "float64":
-			return "number"
-		case "bool":
-			return "boolean"
-		default:
-			return "string" // default to string for unknown types
+		mapping := MapGoTypeToOpenAPI(t.Name)
+		if mapping.Type != "object" {
+			return mapping.Type
 		}
+		// Default to string if assumed enum type is object
+		return "string"
 	case *ast.SelectorExpr:
 		// Handle qualified types
 		return "string"
