@@ -176,11 +176,22 @@ func (b *Builder) handleBodyParameter(field *ast.Field, operation *spec.Operatio
 		isArray = true
 	}
 
-	// Create request body
-	operation.RequestBody = &spec.RequestBody{
-		Description: description,
-		Required:    true,
-		Content:     make(map[string]*spec.MediaType),
+	// Create request body if it doesn't exist
+	if operation.RequestBody == nil {
+		operation.RequestBody = &spec.RequestBody{
+			Description: description,
+			Required:    true,
+			Content:     make(map[string]*spec.MediaType),
+		}
+	} else {
+		// Update description if not set
+		if operation.RequestBody.Description == "" {
+			operation.RequestBody.Description = description
+		}
+		// Ensure Content map exists
+		if operation.RequestBody.Content == nil {
+			operation.RequestBody.Content = make(map[string]*spec.MediaType)
+		}
 	}
 
 	var schema *spec.Schema
@@ -199,7 +210,17 @@ func (b *Builder) handleBodyParameter(field *ast.Field, operation *spec.Operatio
 		}
 	}
 
-	// Add common content types
+	// If content types are already defined (e.g. by Consumes), update them with schema
+	if len(operation.RequestBody.Content) > 0 {
+		for _, mediaType := range operation.RequestBody.Content {
+			if mediaType.Schema == nil {
+				mediaType.Schema = schema
+			}
+		}
+		return
+	}
+
+	// Otherwise add default content types
 	operation.RequestBody.Content["application/json"] = &spec.MediaType{
 		Schema: schema,
 	}

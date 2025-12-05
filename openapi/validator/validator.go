@@ -64,8 +64,9 @@ func (r *ValidationResult) IsValid() bool {
 
 // Validator validates OpenAPI specifications
 type Validator struct {
-	spec   *spec.OpenAPI
-	result *ValidationResult
+	spec         *spec.OpenAPI
+	result       *ValidationResult
+	operationIDs map[string]string // map[id]path
 }
 
 // New creates a new validator for the given spec
@@ -76,6 +77,7 @@ func New(s *spec.OpenAPI) *Validator {
 			Errors:   []ValidationError{},
 			Warnings: []ValidationError{},
 		},
+		operationIDs: make(map[string]string),
 	}
 }
 
@@ -85,6 +87,7 @@ func (v *Validator) Validate() *ValidationResult {
 		Errors:   []ValidationError{},
 		Warnings: []ValidationError{},
 	}
+	v.operationIDs = make(map[string]string)
 
 	// Validate basic structure
 	v.validateBasicStructure()
@@ -301,6 +304,15 @@ func (v *Validator) validatePath(path string, pathItem *spec.PathItem) {
 
 // validateOperation validates an operation
 func (v *Validator) validateOperation(path string, operation *spec.Operation) {
+	// Check for duplicate OperationID
+	if operation.OperationID != "" {
+		if existingPath, ok := v.operationIDs[operation.OperationID]; ok {
+			v.addError(path+".operationId", fmt.Sprintf("Duplicate operationId '%s' found at %s", operation.OperationID, existingPath))
+		} else {
+			v.operationIDs[operation.OperationID] = path
+		}
+	}
+
 	// Validate parameters
 	for i, param := range operation.Parameters {
 		v.validateParameter(fmt.Sprintf("%s.parameters[%d]", path, i), param)
@@ -370,7 +382,7 @@ func (v *Validator) validateResponses(path string, responses *spec.Responses) {
 // validateResponse validates a single response
 func (v *Validator) validateResponse(path string, response *spec.Response) {
 	if response.Description == "" {
-		v.addWarning(path, "Response description is recommended")
+		v.addError(path, "Response description is required")
 	}
 
 	for mediaType, content := range response.Content {
@@ -437,13 +449,16 @@ func (v *Validator) validateSecuritySchemes() {
 // validateSecurityRequirements validates security requirements reference existing schemes
 func (v *Validator) validateSecurityRequirements(path string, requirements []spec.SecurityRequirement) {
 	if v.spec.Components == nil || v.spec.Components.SecuritySchemes == nil {
+		if len(requirements) > 0 {
+			v.addError(path, "Security requirements defined but no security schemes in components")
+		}
 		return
 	}
 
 	for i, req := range requirements {
 		for schemeName := range req {
 			if _, exists := v.spec.Components.SecuritySchemes[schemeName]; !exists {
-				v.addWarning(fmt.Sprintf("%s[%d]", path, i),
+				v.addError(fmt.Sprintf("%s[%d]", path, i),
 					fmt.Sprintf("Security scheme '%s' not found in components", schemeName))
 			}
 		}

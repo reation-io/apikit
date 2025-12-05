@@ -165,16 +165,22 @@ func extractEnumDescription(doc *ast.CommentGroup) string {
 		text := strings.TrimPrefix(comment.Text, "//")
 		text = strings.TrimPrefix(text, "/*")
 		text = strings.TrimSuffix(text, "*/")
-		text = strings.TrimSpace(text)
 
-		// Skip directive and tag lines
-		if strings.HasPrefix(text, "swagger:") ||
-			strings.HasPrefix(strings.ToLower(text), "example:") {
-			continue
-		}
+		// Split by newlines to handle block comments
+		rawLines := strings.Split(text, "\n")
+		for _, line := range rawLines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
 
-		if text != "" {
-			lines = append(lines, text)
+			// Skip directive and tag lines
+			if strings.HasPrefix(line, "swagger:") ||
+				strings.HasPrefix(strings.ToLower(line), "example:") {
+				continue
+			}
+
+			lines = append(lines, line)
 		}
 	}
 
@@ -192,11 +198,14 @@ func extractEnumTagValue(doc *ast.CommentGroup, tag string) any {
 		text := strings.TrimPrefix(comment.Text, "//")
 		text = strings.TrimPrefix(text, "/*")
 		text = strings.TrimSuffix(text, "*/")
-		text = strings.TrimSpace(text)
 
-		if strings.HasPrefix(strings.ToLower(text), tagLower) {
-			value := strings.TrimSpace(text[len(tag):])
-			return strings.Trim(value, `"'`)
+		rawLines := strings.Split(text, "\n")
+		for _, line := range rawLines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(strings.ToLower(line), tagLower) {
+				value := strings.TrimSpace(line[len(tag):])
+				return strings.Trim(value, `"'`)
+			}
 		}
 	}
 
@@ -214,15 +223,18 @@ func extractDirectiveValue(doc *ast.CommentGroup, directive string) string {
 		text := strings.TrimPrefix(comment.Text, "//")
 		text = strings.TrimPrefix(text, "/*")
 		text = strings.TrimSuffix(text, "*/")
-		text = strings.TrimSpace(text)
 
-		if strings.HasPrefix(text, directive) {
-			value := strings.TrimSpace(text[len(directive):])
-			// Take only the first word
-			if idx := strings.IndexAny(value, " \t\n"); idx > 0 {
-				value = value[:idx]
+		rawLines := strings.Split(text, "\n")
+		for _, line := range rawLines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, directive) {
+				value := strings.TrimSpace(line[len(directive):])
+				// Take only the first word
+				if idx := strings.IndexAny(value, " \t\n"); idx > 0 {
+					value = value[:idx]
+				}
+				return value
 			}
-			return value
 		}
 	}
 
