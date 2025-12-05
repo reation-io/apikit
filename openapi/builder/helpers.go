@@ -14,8 +14,17 @@ func hasDirective(comments *ast.CommentGroup, directive string) bool {
 	if comments == nil {
 		return false
 	}
-	text := comments.Text()
-	return strings.Contains(text, directive)
+	for _, comment := range comments.List {
+		text := strings.TrimSpace(comment.Text)
+		text = strings.TrimPrefix(text, "//")
+		text = strings.TrimPrefix(text, "/*")
+		text = strings.TrimSuffix(text, "*/")
+		text = strings.TrimSpace(text)
+		if strings.HasPrefix(text, directive) {
+			return true
+		}
+	}
+	return false
 }
 
 // isInvalidTargetError checks if an error is an invalid target error
