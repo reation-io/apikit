@@ -27,7 +27,10 @@ type API struct{}
 	}
 
 	// Build the spec
-	builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+	builder := NewBuilderWithOptions(
+		WithDir(tmpDir),
+		WithPattern("."),
+	)
 	openapi, err := builder.Build()
 	if err != nil {
 		t.Fatalf("failed to build spec: %v", err)
@@ -63,7 +66,10 @@ type CreateUserRequest struct{}
 	}
 
 	// Build the spec
-	builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+	builder := NewBuilderWithOptions(
+		WithDir(tmpDir),
+		WithPattern("."),
+	)
 	openapi, err := builder.Build()
 	if err != nil {
 		t.Fatalf("failed to build spec: %v", err)
@@ -118,7 +124,10 @@ type User struct {
 	}
 
 	// Build the spec
-	builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+	builder := NewBuilderWithOptions(
+		WithDir(tmpDir),
+		WithPattern("."),
+	)
 	openapi, err := builder.Build()
 	if err != nil {
 		t.Fatalf("failed to build spec: %v", err)
@@ -195,9 +204,6 @@ func TestNewBuilderWithOptions(t *testing.T) {
 			WithPattern("./..."),
 		)
 
-		if !builder.config.UseScanner {
-			t.Error("expected UseScanner to be true when WithPattern is used")
-		}
 		if builder.config.ScannerConfig.Pattern != "./..." {
 			t.Errorf("expected pattern './...', got %q", builder.config.ScannerConfig.Pattern)
 		}
@@ -208,9 +214,6 @@ func TestNewBuilderWithOptions(t *testing.T) {
 			WithDir("/project"),
 		)
 
-		if !builder.config.UseScanner {
-			t.Error("expected UseScanner to be true when WithDir is used")
-		}
 		if builder.config.ScannerConfig.Dir != "/project" {
 			t.Errorf("expected dir '/project', got %q", builder.config.ScannerConfig.Dir)
 		}
@@ -234,19 +237,6 @@ func TestNewBuilderWithOptions(t *testing.T) {
 
 		if !builder.config.Validation {
 			t.Error("expected Validation to be true")
-		}
-	})
-
-	t.Run("with legacy patterns", func(t *testing.T) {
-		builder := NewBuilderWithOptions(
-			WithLegacyPatterns("*.go", "handlers/*.go"),
-		)
-
-		if builder.config.UseScanner {
-			t.Error("expected UseScanner to be false when WithLegacyPatterns is used")
-		}
-		if len(builder.config.Patterns) != 2 {
-			t.Errorf("expected 2 patterns, got %d", len(builder.config.Patterns))
 		}
 	})
 }
@@ -291,7 +281,8 @@ type ListUsersRequest struct{}
 		}
 
 		builder := NewBuilderWithOptions(
-			WithLegacyPatterns(filepath.Join(tmpDir, "*.go")),
+			WithDir(tmpDir),
+			WithPattern("."),
 			WithValidation(true),
 		)
 
@@ -317,7 +308,8 @@ type API struct{}
 		}
 
 		builder := NewBuilderWithOptions(
-			WithLegacyPatterns(filepath.Join(tmpDir, "*.go")),
+			WithDir(tmpDir),
+			WithPattern("."),
 			WithValidation(false),
 		)
 
@@ -366,7 +358,10 @@ type User struct {
 			t.Fatalf("failed to write test file: %v", err)
 		}
 
-		builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+		builder := NewBuilderWithOptions(
+			WithDir(tmpDir),
+			WithPattern("."),
+		)
 		openapi, err := builder.Build()
 		if err != nil {
 			t.Fatalf("failed to build spec: %v", err)

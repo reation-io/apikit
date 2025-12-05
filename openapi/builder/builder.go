@@ -3,9 +3,7 @@ package builder
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"path/filepath"
 	"strings"
 
 	constants "github.com/reation-io/apikit/openapi"
@@ -23,41 +21,21 @@ type Builder struct {
 	spec         *spec.OpenAPI
 	document     *spec.OpenAPI // alias for spec (used by embedded.go)
 	fset         *token.FileSet
-	patterns     []string // File patterns to scan (legacy mode)
 	config       *BuilderConfig
 	files        map[string]*ast.File // Cached files from scanner
 	enumRegistry *spec.EnumRegistry   // Registry of discovered enums
 }
 
-// NewBuilder creates a new OpenAPI builder with legacy pattern support
+// NewBuilder creates a new OpenAPI builder
 // For more advanced configuration, use NewBuilderWithOptions
 func NewBuilder(patterns ...string) *Builder {
-	if len(patterns) == 0 {
-		patterns = []string{"**/*.go"}
+	var opts []Option
+	if len(patterns) > 0 {
+		opts = append(opts, WithPattern(patterns[0]))
+	} else {
+		opts = append(opts, WithPattern("./..."))
 	}
-
-	openAPISpec := &spec.OpenAPI{
-		OpenAPI: "3.0.3",
-		Info: &spec.Info{
-			Title:   "API",
-			Version: "1.0.0",
-		},
-		Paths: &spec.Paths{
-			PathItems: make(map[string]*spec.PathItem),
-		},
-	}
-	return &Builder{
-		spec:     openAPISpec,
-		document: openAPISpec,
-		fset:     token.NewFileSet(),
-		patterns: patterns,
-		config: &BuilderConfig{
-			UseScanner: false,
-			Patterns:   patterns,
-		},
-		files:        make(map[string]*ast.File),
-		enumRegistry: spec.NewEnumRegistry(),
-	}
+	return NewBuilderWithOptions(opts...)
 }
 
 // NewBuilderWithOptions creates a new OpenAPI builder with functional options
@@ -71,7 +49,6 @@ func NewBuilder(patterns ...string) *Builder {
 //	)
 func NewBuilderWithOptions(opts ...Option) *Builder {
 	config := &BuilderConfig{
-		UseScanner:    false,
 		ScannerConfig: &scanner.Config{},
 	}
 
@@ -79,9 +56,9 @@ func NewBuilderWithOptions(opts ...Option) *Builder {
 		opt(config)
 	}
 
-	// If no patterns and no scanner config, use defaults
-	if !config.UseScanner && len(config.Patterns) == 0 {
-		config.Patterns = []string{"**/*.go"}
+	// Ensure default pattern if not set
+	if config.ScannerConfig.Pattern == "" {
+		config.ScannerConfig.Pattern = "./..."
 	}
 
 	openAPISpec := &spec.OpenAPI{
@@ -98,7 +75,6 @@ func NewBuilderWithOptions(opts ...Option) *Builder {
 		spec:         openAPISpec,
 		document:     openAPISpec,
 		fset:         token.NewFileSet(),
-		patterns:     config.Patterns,
 		config:       config,
 		files:        make(map[string]*ast.File),
 		enumRegistry: spec.NewEnumRegistry(),
@@ -107,32 +83,6 @@ func NewBuilderWithOptions(opts ...Option) *Builder {
 
 // Build scans files and builds the OpenAPI specification
 func (b *Builder) Build() (*spec.OpenAPI, error) {
-	// Use new scanner if configured, otherwise use legacy mode
-	if b.config != nil && b.config.UseScanner {
-		return b.buildWithScanner()
-	}
-
-	return b.buildLegacy()
-}
-
-// Validate validates the built spec and returns validation errors
-func (b *Builder) Validate() *validator.ValidationResult {
-	v := validator.New(b.spec)
-	return v.Validate()
-}
-
-// validate runs validation and returns an error if there are critical issues
-func (b *Builder) validate() error {
-	result := b.Validate()
-	if result.HasErrors() {
-		// Return first error as the main error
-		return fmt.Errorf("validation failed: %s", result.Errors[0].Error())
-	}
-	return nil
-}
-
-// buildWithScanner uses the new go/packages scanner
-func (b *Builder) buildWithScanner() (*spec.OpenAPI, error) {
 	s := scanner.NewWithConfig(b.config.ScannerConfig)
 
 	files, fset, err := s.ScanFiles()
@@ -160,77 +110,24 @@ func (b *Builder) buildWithScanner() (*spec.OpenAPI, error) {
 	return b.spec, nil
 }
 
-// buildLegacy uses the original filepath.Glob approach
-func (b *Builder) buildLegacy() (*spec.OpenAPI, error) {
-	// Find all Go files matching patterns
-	files, err := b.findFiles()
-	if err != nil {
-		return nil, fmt.Errorf("failed to find files: %w", err)
-	}
+// Validate validates the built spec and returns validation errors
+func (b *Builder) Validate() *validator.ValidationResult {
+	v := validator.New(b.spec)
+	return v.Validate()
+}
 
-	// Parse each file
-	for _, file := range files {
-		if err := b.parseFile(file); err != nil {
-			return nil, fmt.Errorf("failed to parse file %s: %w", file, err)
-		}
+// validate runs validation and returns an error if there are critical issues
+func (b *Builder) validate() error {
+	result := b.Validate()
+	if result.HasErrors() {
+		// Return first error as the main error
+		return fmt.Errorf("validation failed: %s", result.Errors[0].Error())
 	}
-
-	// Validate if enabled
-	if b.config != nil && b.config.Validation {
-		if err := b.validate(); err != nil {
-			return nil, err
-		}
-	}
-
-	return b.spec, nil
+	return nil
 }
 
 // processFile processes a pre-parsed AST file (used with scanner)
 func (b *Builder) processFile(filePath string, file *ast.File) error {
-	// Look for swagger:enum comments (first, so models can reference enums)
-	if err := b.parseEnums(file); err != nil {
-		return fmt.Errorf("failed to parse enums: %w", err)
-	}
-
-	// Look for swagger:meta comments
-	if err := b.parseMeta(file); err != nil {
-		return fmt.Errorf("failed to parse meta: %w", err)
-	}
-
-	// Look for swagger:route comments
-	if err := b.parseRoutes(file); err != nil {
-		return fmt.Errorf("failed to parse routes: %w", err)
-	}
-
-	// Look for swagger:model comments
-	if err := b.parseModels(file); err != nil {
-		return fmt.Errorf("failed to parse models: %w", err)
-	}
-
-	return nil
-}
-
-// findFiles finds all Go files matching the patterns
-func (b *Builder) findFiles() ([]string, error) {
-	var files []string
-	for _, pattern := range b.patterns {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			return nil, err
-		}
-		files = append(files, matches...)
-	}
-	return files, nil
-}
-
-// parseFile parses a single Go file and extracts OpenAPI information
-func (b *Builder) parseFile(filename string) error {
-	// Parse the file
-	file, err := parser.ParseFile(b.fset, filename, nil, parser.ParseComments)
-	if err != nil {
-		return err
-	}
-
 	// Look for swagger:enum comments (first, so models can reference enums)
 	if err := b.parseEnums(file); err != nil {
 		return fmt.Errorf("failed to parse enums: %w", err)
@@ -684,23 +581,6 @@ func (b *Builder) createEnumSchema(enumInfo *spec.EnumInfo) *spec.Schema {
 	}
 
 	return schema
-}
-
-// goTypeToJSONType converts Go types to JSON Schema types
-func goTypeToJSONType(goType string) string {
-	switch goType {
-	case "string":
-		return "string"
-	case "int", "int8", "int16", "int32", "int64",
-		"uint", "uint8", "uint16", "uint32", "uint64":
-		return "integer"
-	case "float32", "float64":
-		return "number"
-	case "bool":
-		return "boolean"
-	default:
-		return "object"
-	}
 }
 
 // getJSONName extracts the JSON name from struct tags

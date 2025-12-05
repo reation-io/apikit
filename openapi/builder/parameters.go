@@ -2,8 +2,6 @@ package builder
 
 import (
 	"go/ast"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/reation-io/apikit/openapi/spec"
@@ -363,39 +361,6 @@ func isDirectiveLine(text string) bool {
 	}
 	return false
 }
-
-// parseIntValue parses an integer value from a string
-func parseIntValue(s string) (int, bool) {
-	v, err := strconv.Atoi(strings.TrimSpace(s))
-	if err != nil {
-		return 0, false
-	}
-	return v, true
-}
-
-// parseFloatValue parses a float value from a string
-func parseFloatValue(s string) (float64, bool) {
-	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil {
-		return 0, false
-	}
-	return v, true
-}
-
-// parseBoolValue parses a boolean value from a string
-func parseBoolValue(s string) (bool, bool) {
-	s = strings.ToLower(strings.TrimSpace(s))
-	if s == "true" || s == "yes" || s == "1" {
-		return true, true
-	}
-	if s == "false" || s == "no" || s == "0" {
-		return false, true
-	}
-	return false, false
-}
-
-// descriptionPattern matches description lines (not directives)
-var descriptionPattern = regexp.MustCompile(`^[A-Z]`)
 
 // hasSwaggerIgnore checks if a comment group contains swagger:ignore directive
 func hasSwaggerIgnore(comments *ast.CommentGroup) bool {

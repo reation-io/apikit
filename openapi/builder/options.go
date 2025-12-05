@@ -9,15 +9,8 @@ type BuilderConfig struct {
 	// Scanner configuration
 	ScannerConfig *scanner.Config
 
-	// UseScanner indicates whether to use the new go/packages scanner
-	// When false, uses the legacy filepath.Glob approach (default for backward compatibility)
-	UseScanner bool
-
 	// Validation enables automatic validation of the generated spec
 	Validation bool
-
-	// Legacy patterns for backward compatibility
-	Patterns []string
 }
 
 // Option is a function that configures the Builder
@@ -27,7 +20,6 @@ type Option func(*BuilderConfig)
 // This enables the new go/packages scanner
 func WithPattern(pattern string) Option {
 	return func(c *BuilderConfig) {
-		c.UseScanner = true
 		if c.ScannerConfig == nil {
 			c.ScannerConfig = &scanner.Config{}
 		}
@@ -39,7 +31,6 @@ func WithPattern(pattern string) Option {
 // This enables the new go/packages scanner
 func WithDir(dir string) Option {
 	return func(c *BuilderConfig) {
-		c.UseScanner = true
 		if c.ScannerConfig == nil {
 			c.ScannerConfig = &scanner.Config{}
 		}
@@ -64,19 +55,9 @@ func WithValidation(enabled bool) Option {
 	}
 }
 
-// WithLegacyPatterns sets legacy file patterns (for backward compatibility)
-// This uses the old filepath.Glob approach instead of go/packages
-func WithLegacyPatterns(patterns ...string) Option {
-	return func(c *BuilderConfig) {
-		c.UseScanner = false
-		c.Patterns = patterns
-	}
-}
-
 // WithScannerConfig sets the full scanner configuration
 func WithScannerConfig(config *scanner.Config) Option {
 	return func(c *BuilderConfig) {
-		c.UseScanner = true
 		c.ScannerConfig = config
 	}
 }

@@ -235,20 +235,3 @@ func extractDirectiveValue(doc *ast.CommentGroup, directive string) string {
 
 	return ""
 }
-
-// parseEnumTypeAlias handles type aliases that reference enum types
-func (b *Builder) parseEnumTypeAlias(typeSpec *ast.TypeSpec) {
-	typeName := typeSpec.Name.Name
-
-	switch t := typeSpec.Type.(type) {
-	case *ast.Ident:
-		// Simple type alias: type BankInstrumentType = InstrumentType
-		b.enumRegistry.RegisterTypeAlias(typeName, t.Name)
-
-	case *ast.SelectorExpr:
-		// Qualified type alias: type Status = pkg.Status
-		if _, ok := t.X.(*ast.Ident); ok {
-			b.enumRegistry.RegisterTypeAlias(typeName, t.Sel.Name)
-		}
-	}
-}
