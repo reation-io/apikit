@@ -66,6 +66,18 @@ func (p *Parser) Parse(generic *coreast.ParseResult) *definition.Definition {
 		}
 	}
 
+	// 2. Convert other types (Enums, Aliases)
+	for _, t := range generic.Types {
+		// Skip if already parsed (e.g. it was a struct)
+		if _, exists := p.def.Types[t.Name]; exists {
+			continue
+		}
+		p.parseTypeDecl(t)
+	}
+
+	// 3. Extract Enum Values from Constants
+	p.extractEnumValues(generic)
+
 	// 2. Find and convert handlers to Operations
 	for _, fn := range generic.Functions {
 		if hasDirective(fn.Doc, "apikit:handler") {
@@ -485,4 +497,38 @@ func parseInLocation(field *definition.Field) (string, string) {
 	}
 
 	return "", ""
+}
+
+func (p *Parser) parseTypeDecl(td *coreast.TypeDecl) {
+	// Simple parsing for non-struct types
+	typeName := p.typeToString(td.TypeSpec.Type)
+	t := &definition.Type{
+		Name:        td.Name,
+		Kind:        "primitive", // Default, might be alias
+		GoType:      typeName,
+		Description: getDocText(td.Doc),
+		Doc:         td.Doc,
+	}
+
+	// Check for swagger:enum
+	if hasDirective(td.Doc, "swagger:enum") {
+		t.Kind = "enum"
+	}
+
+	p.def.Types[td.Name] = t
+}
+
+func (p *Parser) extractEnumValues(generic *coreast.ParseResult) {
+	// Map constants to their types
+	for _, c := range generic.Constants {
+		if c.Type == "" {
+			continue
+		}
+
+		// Check if the type is a registered enum
+		if t, ok := p.def.Types[c.Type]; ok {
+			// Add value to enum
+			t.EnumValues = append(t.EnumValues, c.Value)
+		}
+	}
 }

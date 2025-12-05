@@ -16,7 +16,7 @@ type Definition struct {
 	// Types (Schemas) defined in the API
 	Types map[string]*Type
 	// Metadata contains generic metadata about the API (e.g. from swagger:meta)
-	Metadata map[string]interface{}
+	Metadata map[string]any
 }
 
 // Operation represents an API operation (e.g., GET /users)
@@ -88,6 +88,8 @@ type Type struct {
 	RefName string
 	// Doc contains raw documentation comments
 	Doc *ast.CommentGroup
+	// For enums
+	EnumValues []any // List of allowed values
 }
 
 // Field represents a field in a struct

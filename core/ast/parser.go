@@ -32,6 +32,7 @@ func (p *Parser) Parse(filename string) (*ParseResult, error) {
 	result := &ParseResult{
 		File:      file,
 		Structs:   make(map[string]*Struct),
+		Types:     make(map[string]*TypeDecl),
 		Functions: []*Function{},
 		Imports:   extractImports(file),
 		Package:   file.Name.Name,
@@ -59,6 +60,41 @@ func (p *Parser) Parse(filename string) (*ParseResult, error) {
 		if funcDecl, ok := n.(*ast.FuncDecl); ok {
 			f := p.parseFunction(funcDecl)
 			result.Functions = append(result.Functions, f)
+		}
+		return true
+	})
+
+	// Extract all types (structs and others) and constants
+	ast.Inspect(file, func(n ast.Node) bool {
+		if genDecl, ok := n.(*ast.GenDecl); ok {
+			switch genDecl.Tok {
+			case token.TYPE:
+				for _, spec := range genDecl.Specs {
+					if typeSpec, ok := spec.(*ast.TypeSpec); ok {
+						// Store generic type info
+						td := &TypeDecl{
+							Name:     typeSpec.Name.Name,
+							TypeSpec: typeSpec,
+							Doc:      genDecl.Doc,
+							Comment:  typeSpec.Comment,
+							Pos:      p.fset.Position(typeSpec.Pos()),
+						}
+						result.Types[typeSpec.Name.Name] = td
+
+						// If it's a struct, we already handled it in the previous pass
+						// or we can move struct parsing here?
+						// For backward compatibility/simplicity, let's keep struct parsing specialized
+						// but ensure we have the generic record too.
+					}
+				}
+			case token.CONST:
+				for _, spec := range genDecl.Specs {
+					if valueSpec, ok := spec.(*ast.ValueSpec); ok {
+						constants := p.parseConstant(valueSpec, genDecl.Doc)
+						result.Constants = append(result.Constants, constants...)
+					}
+				}
+			}
 		}
 		return true
 	})
@@ -313,4 +349,62 @@ func extractImports(file *ast.File) map[string]string {
 	}
 
 	return imports
+}
+
+// parseConstant extracts constant information
+func (p *Parser) parseConstant(valueSpec *ast.ValueSpec, doc *ast.CommentGroup) []*Constant {
+	var constants []*Constant
+
+	typeName := ""
+	if valueSpec.Type != nil {
+		typeName = p.getTypeName(valueSpec.Type)
+	}
+
+	for i, name := range valueSpec.Names {
+		var value any
+		if i < len(valueSpec.Values) {
+			value = p.extractConstValue(valueSpec.Values[i])
+		}
+
+		c := &Constant{
+			Name:    name.Name,
+			Type:    typeName,
+			Value:   value,
+			Doc:     doc,
+			Comment: valueSpec.Comment,
+			Pos:     p.fset.Position(name.Pos()),
+		}
+		constants = append(constants, c)
+	}
+
+	return constants
+}
+
+// extractConstValue extracts the value from a constant expression
+func (p *Parser) extractConstValue(expr ast.Expr) any {
+	switch v := expr.(type) {
+	case *ast.BasicLit:
+		switch v.Kind {
+		case token.INT:
+			return v.Value
+		case token.FLOAT:
+			return v.Value
+		case token.STRING:
+			return strings.Trim(v.Value, "\"'")
+		}
+	case *ast.Ident:
+		if v.Name == "iota" {
+			return nil
+		}
+		return v.Name
+	case *ast.UnaryExpr:
+		// Handle negative numbers
+		if v.Op == token.SUB {
+			val := p.extractConstValue(v.X)
+			if s, ok := val.(string); ok {
+				return "-" + s
+			}
+		}
+	}
+	return nil
 }

@@ -819,11 +819,11 @@ func getSpecNamesFromOperation(operation *spec.Operation) []string {
 		return nil
 	}
 
-	// Handle both []string and []interface{} (from JSON unmarshaling)
+	// Handle both []string and []any (from JSON unmarshaling)
 	switch v := specs.(type) {
 	case []string:
 		return v
-	case []interface{}:
+	case []any:
 		result := make([]string, 0, len(v))
 		for _, item := range v {
 			if str, ok := item.(string); ok {
