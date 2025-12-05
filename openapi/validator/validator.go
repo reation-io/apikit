@@ -108,6 +108,9 @@ func (v *Validator) Validate() *ValidationResult {
 	// Validate security schemes
 	v.validateSecuritySchemes()
 
+	// Check for circular references
+	v.checkCircularReferences()
+
 	return v.result
 }
 
@@ -579,4 +582,157 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// checkCircularReferences checks for circular $ref references in schemas
+func (v *Validator) checkCircularReferences() {
+	if v.spec.Components == nil || v.spec.Components.Schemas == nil {
+		return
+	}
+
+	// Build a graph of references
+	refGraph := make(map[string][]string)
+	for name, schema := range v.spec.Components.Schemas {
+		refs := v.collectSchemaRefs(schema)
+		if len(refs) > 0 {
+			refGraph[name] = refs
+		}
+	}
+
+	// Track schemas we've already reported to avoid duplicate warnings
+	reported := make(map[string]bool)
+
+	// Detect cycles using DFS
+	for name := range v.spec.Components.Schemas {
+		if reported[name] {
+			continue
+		}
+
+		visited := make(map[string]bool)
+		path := make(map[string]bool)
+		if cycle := v.detectCycle(name, refGraph, visited, path, []string{}); len(cycle) > 0 {
+			location := fmt.Sprintf("components.schemas.%s", name)
+
+			// Differentiate between self-reference and true circular dependency
+			if v.isSelfReference(cycle) {
+				// Self-reference is common and valid (e.g., TreeNode.children -> TreeNode)
+				// Report as info-level warning with clearer message
+				v.addWarning(
+					location,
+					fmt.Sprintf("Self-referencing schema: '%s' references itself (this is valid but may cause issues with some code generators)", name),
+				)
+			} else {
+				// True circular dependency between different schemas
+				v.addWarning(
+					location,
+					fmt.Sprintf("Circular dependency detected: %s (this may cause issues with some code generators)", strings.Join(cycle, " -> ")),
+				)
+			}
+
+			// Mark all schemas in cycle as reported
+			for _, schema := range cycle {
+				reported[schema] = true
+			}
+		}
+	}
+}
+
+// isSelfReference checks if a cycle is a simple self-reference (A -> A)
+func (v *Validator) isSelfReference(cycle []string) bool {
+	if len(cycle) != 2 {
+		return false
+	}
+	return cycle[0] == cycle[1]
+}
+
+// collectSchemaRefs collects all schema references from a schema
+func (v *Validator) collectSchemaRefs(schema *spec.Schema) []string {
+	var refs []string
+
+	if schema == nil {
+		return refs
+	}
+
+	// Direct reference
+	if schema.Ref != "" {
+		if ref := v.extractSchemaName(schema.Ref); ref != "" {
+			refs = append(refs, ref)
+		}
+	}
+
+	// Properties
+	for _, propSchema := range schema.Properties {
+		refs = append(refs, v.collectSchemaRefs(propSchema)...)
+	}
+
+	// Items (arrays)
+	if schema.Items != nil {
+		refs = append(refs, v.collectSchemaRefs(schema.Items)...)
+	}
+
+	// AdditionalProperties (maps) - can be bool or *Schema
+	if schema.AdditionalProperties != nil {
+		if additionalSchema, ok := schema.AdditionalProperties.(*spec.Schema); ok {
+			refs = append(refs, v.collectSchemaRefs(additionalSchema)...)
+		}
+	}
+
+	// Composition
+	for _, s := range schema.AllOf {
+		refs = append(refs, v.collectSchemaRefs(s)...)
+	}
+	for _, s := range schema.OneOf {
+		refs = append(refs, v.collectSchemaRefs(s)...)
+	}
+	for _, s := range schema.AnyOf {
+		refs = append(refs, v.collectSchemaRefs(s)...)
+	}
+
+	return refs
+}
+
+// extractSchemaName extracts the schema name from a $ref path
+func (v *Validator) extractSchemaName(ref string) string {
+	const prefix = "#/components/schemas/"
+	if strings.HasPrefix(ref, prefix) {
+		return ref[len(prefix):]
+	}
+	return ""
+}
+
+// detectCycle performs DFS to detect cycles in the reference graph
+func (v *Validator) detectCycle(
+	node string,
+	graph map[string][]string,
+	visited map[string]bool,
+	path map[string]bool,
+	currentPath []string,
+) []string {
+	if path[node] {
+		// Found a cycle - return the path from the first occurrence of node
+		for i, n := range currentPath {
+			if n == node {
+				cycle := append(currentPath[i:], node)
+				return cycle
+			}
+		}
+		return append(currentPath, node)
+	}
+
+	if visited[node] {
+		return nil
+	}
+
+	visited[node] = true
+	path[node] = true
+	currentPath = append(currentPath, node)
+
+	for _, neighbor := range graph[node] {
+		if cycle := v.detectCycle(neighbor, graph, visited, path, currentPath); len(cycle) > 0 {
+			return cycle
+		}
+	}
+
+	path[node] = false
+	return nil
 }

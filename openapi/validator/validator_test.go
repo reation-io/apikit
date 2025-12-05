@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/reation-io/apikit/openapi/spec"
@@ -376,6 +377,151 @@ func TestValidationResult(t *testing.T) {
 		}
 		if !result.HasWarnings() {
 			t.Error("result should have warnings")
+		}
+	})
+}
+
+func TestValidator_CircularReferences(t *testing.T) {
+	t.Run("detects circular dependency between schemas", func(t *testing.T) {
+		s := createValidSpec()
+		s.Components = &spec.Components{
+			Schemas: map[string]*spec.Schema{
+				"NodeA": {
+					Type: "object",
+					Properties: map[string]*spec.Schema{
+						"child": {Ref: "#/components/schemas/NodeB"},
+					},
+				},
+				"NodeB": {
+					Type: "object",
+					Properties: map[string]*spec.Schema{
+						"parent": {Ref: "#/components/schemas/NodeA"},
+					},
+				},
+			},
+		}
+
+		v := New(s)
+		result := v.Validate()
+
+		// Should have warnings for circular dependencies
+		if !result.HasWarnings() {
+			t.Error("expected warnings for circular dependencies")
+		}
+
+		foundCircularWarning := false
+		for _, w := range result.Warnings {
+			if strings.Contains(w.Message, "Circular dependency detected") {
+				foundCircularWarning = true
+				t.Logf("Found expected warning: %s", w.Message)
+				break
+			}
+		}
+		if !foundCircularWarning {
+			t.Error("expected 'Circular dependency detected' warning")
+		}
+	})
+
+	t.Run("no warning for non-circular references", func(t *testing.T) {
+		s := createValidSpec()
+		s.Components = &spec.Components{
+			Schemas: map[string]*spec.Schema{
+				"Address": {
+					Type: "object",
+					Properties: map[string]*spec.Schema{
+						"street": {Type: "string"},
+					},
+				},
+				"Person": {
+					Type: "object",
+					Properties: map[string]*spec.Schema{
+						"name":    {Type: "string"},
+						"address": {Ref: "#/components/schemas/Address"},
+					},
+				},
+			},
+		}
+
+		v := New(s)
+		result := v.Validate()
+
+		// Should not have circular reference warnings
+		for _, w := range result.Warnings {
+			if strings.Contains(w.Message, "Circular") || strings.Contains(w.Message, "Self-referencing") {
+				t.Errorf("unexpected circular/self-reference warning: %s", w.Message)
+			}
+		}
+	})
+
+	t.Run("detects self-referencing schema with specific message", func(t *testing.T) {
+		s := createValidSpec()
+		s.Components = &spec.Components{
+			Schemas: map[string]*spec.Schema{
+				"TreeNode": {
+					Type: "object",
+					Properties: map[string]*spec.Schema{
+						"value":    {Type: "string"},
+						"children": {Type: "array", Items: &spec.Schema{Ref: "#/components/schemas/TreeNode"}},
+					},
+				},
+			},
+		}
+
+		v := New(s)
+		result := v.Validate()
+
+		// Self-references should be detected with a specific message
+		if !result.HasWarnings() {
+			t.Error("expected warning for self-referencing schema")
+			return
+		}
+
+		foundSelfRefWarning := false
+		for _, w := range result.Warnings {
+			if strings.Contains(w.Message, "Self-referencing schema") {
+				foundSelfRefWarning = true
+				t.Logf("Found expected warning: %s", w.Message)
+				break
+			}
+		}
+		if !foundSelfRefWarning {
+			t.Error("expected 'Self-referencing schema' warning")
+		}
+	})
+
+	t.Run("does not report duplicate warnings for same cycle", func(t *testing.T) {
+		s := createValidSpec()
+		s.Components = &spec.Components{
+			Schemas: map[string]*spec.Schema{
+				"A": {
+					Type: "object",
+					Properties: map[string]*spec.Schema{
+						"b": {Ref: "#/components/schemas/B"},
+					},
+				},
+				"B": {
+					Type: "object",
+					Properties: map[string]*spec.Schema{
+						"a": {Ref: "#/components/schemas/A"},
+					},
+				},
+			},
+		}
+
+		v := New(s)
+		result := v.Validate()
+
+		// Count circular dependency warnings
+		cycleWarnings := 0
+		for _, w := range result.Warnings {
+			if strings.Contains(w.Message, "Circular dependency") {
+				cycleWarnings++
+			}
+		}
+
+		// Should only report cycle once, not for both A and B
+		if cycleWarnings > 1 {
+			t.Errorf("expected at most 1 circular dependency warning, got %d", cycleWarnings)
 		}
 	})
 }

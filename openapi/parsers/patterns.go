@@ -1,9 +1,100 @@
 package parsers
 
-import "regexp"
+import (
+	"fmt"
+	"regexp"
+	"sync"
+)
 
 // Centralized regex patterns for all parsers
 // Inspired by go-swagger's regexprs.go
+
+// Common pattern suffixes
+const (
+	// SectionEndPattern matches the end of a multi-line section
+	// It matches either the start of a new directive or end of string
+	SectionEndPattern = `(?:^[A-Z][a-zA-Z]*\s*:|\z)`
+
+	// MapTypePattern matches Go map types: map[KeyType]ValueType
+	MapTypePattern = `^map\[([^\]]+)\](.+)$`
+
+	// MarkdownLinkPattern matches markdown links: [text](url)
+	MarkdownLinkPattern = `\[([^\]]+)\]\(([^)]+)\)`
+
+	// URLPattern matches HTTP/HTTPS URLs
+	URLPattern = `(https?://\S+)`
+
+	// EmailPattern matches email in angle brackets: <email@example.com>
+	EmailPattern = `<([^>]+)>`
+)
+
+// Compiled regex cache for performance
+var (
+	regexCache      = make(map[string]*regexp.Regexp)
+	regexCacheMutex sync.RWMutex
+)
+
+// getCompiledRegex returns a cached compiled regex for the given pattern
+func getCompiledRegex(pattern string) *regexp.Regexp {
+	regexCacheMutex.RLock()
+	if rx, ok := regexCache[pattern]; ok {
+		regexCacheMutex.RUnlock()
+		return rx
+	}
+	regexCacheMutex.RUnlock()
+
+	regexCacheMutex.Lock()
+	defer regexCacheMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if rx, ok := regexCache[pattern]; ok {
+		return rx
+	}
+
+	rx := regexp.MustCompile(pattern)
+	regexCache[pattern] = rx
+	return rx
+}
+
+// GetSectionRegex returns a cached compiled regex for extracting multi-line sections.
+// The directive should be like "Description:" or "Responses:".
+// The pattern captures everything from after the directive until the next directive or end of string.
+func GetSectionRegex(directive string) *regexp.Regexp {
+	pattern := fmt.Sprintf(`(?ms)^%s\s*$(.*?)%s`, regexp.QuoteMeta(directive), SectionEndPattern)
+	return getCompiledRegex(pattern)
+}
+
+// GetSingleLineRegex returns a cached compiled regex for extracting single-line values.
+// The directive should be like "Title:" or "Version:".
+// The pattern captures the value on the same line as the directive.
+func GetSingleLineRegex(directive string) *regexp.Regexp {
+	pattern := fmt.Sprintf(`(?i)%s\s*([^\n]+)`, regexp.QuoteMeta(directive))
+	return getCompiledRegex(pattern)
+}
+
+// GetMapTypeRegex returns a cached compiled regex for matching Go map types.
+// Pattern matches: map[KeyType]ValueType
+func GetMapTypeRegex() *regexp.Regexp {
+	return getCompiledRegex(MapTypePattern)
+}
+
+// GetMarkdownLinkRegex returns a cached compiled regex for matching markdown links.
+// Pattern matches: [text](url)
+func GetMarkdownLinkRegex() *regexp.Regexp {
+	return getCompiledRegex(MarkdownLinkPattern)
+}
+
+// GetURLRegex returns a cached compiled regex for matching URLs.
+// Pattern matches: http:// or https:// URLs
+func GetURLRegex() *regexp.Regexp {
+	return getCompiledRegex(URLPattern)
+}
+
+// GetEmailRegex returns a cached compiled regex for matching emails in angle brackets.
+// Pattern matches: <email@example.com>
+func GetEmailRegex() *regexp.Regexp {
+	return getCompiledRegex(EmailPattern)
+}
 
 var (
 	// Meta-level patterns (swagger:meta) - single line patterns
