@@ -25,6 +25,9 @@ type Parameter struct {
 	Required        bool                `json:"required,omitempty" yaml:"required,omitempty"`
 	Deprecated      bool                `json:"deprecated,omitempty" yaml:"deprecated,omitempty"`
 	AllowEmptyValue bool                `json:"allowEmptyValue,omitempty" yaml:"allowEmptyValue,omitempty"`
+	Style           string              `json:"style,omitempty" yaml:"style,omitempty"`
+	Explode         *bool               `json:"explode,omitempty" yaml:"explode,omitempty"`
+	AllowReserved   bool                `json:"allowReserved,omitempty" yaml:"allowReserved,omitempty"`
 	Schema          *Schema             `json:"schema,omitempty" yaml:"schema,omitempty"`
 	Example         any                 `json:"example,omitempty" yaml:"example,omitempty"`
 	Examples        map[string]*Example `json:"examples,omitempty" yaml:"examples,omitempty"`

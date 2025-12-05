@@ -10,7 +10,9 @@ import (
 
 	constants "github.com/reation-io/apikit/openapi"
 	"github.com/reation-io/apikit/openapi/parsers"
+	"github.com/reation-io/apikit/openapi/scanner"
 	"github.com/reation-io/apikit/openapi/spec"
+	"github.com/reation-io/apikit/openapi/validator"
 
 	// Import all parsers to trigger auto-registration
 	_ "github.com/reation-io/apikit/openapi/parsers/tags"
@@ -18,12 +20,16 @@ import (
 
 // Builder builds an OpenAPI specification from Go source files
 type Builder struct {
-	spec     *spec.OpenAPI
-	fset     *token.FileSet
-	patterns []string // File patterns to scan
+	spec         *spec.OpenAPI
+	fset         *token.FileSet
+	patterns     []string // File patterns to scan (legacy mode)
+	config       *BuilderConfig
+	files        map[string]*ast.File // Cached files from scanner
+	enumRegistry *spec.EnumRegistry   // Registry of discovered enums
 }
 
-// NewBuilder creates a new OpenAPI builder
+// NewBuilder creates a new OpenAPI builder with legacy pattern support
+// For more advanced configuration, use NewBuilderWithOptions
 func NewBuilder(patterns ...string) *Builder {
 	if len(patterns) == 0 {
 		patterns = []string{"**/*.go"}
@@ -42,11 +48,115 @@ func NewBuilder(patterns ...string) *Builder {
 		},
 		fset:     token.NewFileSet(),
 		patterns: patterns,
+		config: &BuilderConfig{
+			UseScanner: false,
+			Patterns:   patterns,
+		},
+		files:        make(map[string]*ast.File),
+		enumRegistry: spec.NewEnumRegistry(),
+	}
+}
+
+// NewBuilderWithOptions creates a new OpenAPI builder with functional options
+// Example:
+//
+//	builder := NewBuilderWithOptions(
+//	    WithPattern("./..."),
+//	    WithDir("."),
+//	    WithIgnorePaths("vendor/**"),
+//	    WithValidation(true),
+//	)
+func NewBuilderWithOptions(opts ...Option) *Builder {
+	config := &BuilderConfig{
+		UseScanner:    false,
+		ScannerConfig: &scanner.Config{},
+	}
+
+	for _, opt := range opts {
+		opt(config)
+	}
+
+	// If no patterns and no scanner config, use defaults
+	if !config.UseScanner && len(config.Patterns) == 0 {
+		config.Patterns = []string{"**/*.go"}
+	}
+
+	return &Builder{
+		spec: &spec.OpenAPI{
+			OpenAPI: "3.0.3",
+			Info: &spec.Info{
+				Title:   "API",
+				Version: "1.0.0",
+			},
+			Paths: &spec.Paths{
+				PathItems: make(map[string]*spec.PathItem),
+			},
+		},
+		fset:         token.NewFileSet(),
+		patterns:     config.Patterns,
+		config:       config,
+		files:        make(map[string]*ast.File),
+		enumRegistry: spec.NewEnumRegistry(),
 	}
 }
 
 // Build scans files and builds the OpenAPI specification
 func (b *Builder) Build() (*spec.OpenAPI, error) {
+	// Use new scanner if configured, otherwise use legacy mode
+	if b.config != nil && b.config.UseScanner {
+		return b.buildWithScanner()
+	}
+
+	return b.buildLegacy()
+}
+
+// Validate validates the built spec and returns validation errors
+func (b *Builder) Validate() *validator.ValidationResult {
+	v := validator.New(b.spec)
+	return v.Validate()
+}
+
+// validate runs validation and returns an error if there are critical issues
+func (b *Builder) validate() error {
+	result := b.Validate()
+	if result.HasErrors() {
+		// Return first error as the main error
+		return fmt.Errorf("validation failed: %s", result.Errors[0].Error())
+	}
+	return nil
+}
+
+// buildWithScanner uses the new go/packages scanner
+func (b *Builder) buildWithScanner() (*spec.OpenAPI, error) {
+	s := scanner.NewWithConfig(b.config.ScannerConfig)
+
+	files, fset, err := s.ScanFiles()
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan packages: %w", err)
+	}
+
+	b.fset = fset
+	b.files = files
+
+	// Process each scanned file
+	for filePath, file := range files {
+		if err := b.processFile(filePath, file); err != nil {
+			return nil, fmt.Errorf("failed to process file %s: %w", filePath, err)
+		}
+	}
+
+	// Validate if enabled
+	if b.config.Validation {
+		if err := b.validate(); err != nil {
+			return nil, err
+		}
+	}
+
+	return b.spec, nil
+}
+
+// buildLegacy uses the original filepath.Glob approach
+func (b *Builder) buildLegacy() (*spec.OpenAPI, error) {
 	// Find all Go files matching patterns
 	files, err := b.findFiles()
 	if err != nil {
@@ -60,7 +170,39 @@ func (b *Builder) Build() (*spec.OpenAPI, error) {
 		}
 	}
 
+	// Validate if enabled
+	if b.config != nil && b.config.Validation {
+		if err := b.validate(); err != nil {
+			return nil, err
+		}
+	}
+
 	return b.spec, nil
+}
+
+// processFile processes a pre-parsed AST file (used with scanner)
+func (b *Builder) processFile(filePath string, file *ast.File) error {
+	// Look for swagger:enum comments (first, so models can reference enums)
+	if err := b.parseEnums(file); err != nil {
+		return fmt.Errorf("failed to parse enums: %w", err)
+	}
+
+	// Look for swagger:meta comments
+	if err := b.parseMeta(file); err != nil {
+		return fmt.Errorf("failed to parse meta: %w", err)
+	}
+
+	// Look for swagger:route comments
+	if err := b.parseRoutes(file); err != nil {
+		return fmt.Errorf("failed to parse routes: %w", err)
+	}
+
+	// Look for swagger:model comments
+	if err := b.parseModels(file); err != nil {
+		return fmt.Errorf("failed to parse models: %w", err)
+	}
+
+	return nil
 }
 
 // findFiles finds all Go files matching the patterns
@@ -82,6 +224,11 @@ func (b *Builder) parseFile(filename string) error {
 	file, err := parser.ParseFile(b.fset, filename, nil, parser.ParseComments)
 	if err != nil {
 		return err
+	}
+
+	// Look for swagger:enum comments (first, so models can reference enums)
+	if err := b.parseEnums(file); err != nil {
+		return fmt.Errorf("failed to parse enums: %w", err)
 	}
 
 	// Look for swagger:meta comments
@@ -169,6 +316,22 @@ func (b *Builder) parseRoutes(file *ast.File) error {
 			}
 		}
 
+		// Find and process the struct type to extract parameters and request body
+		for _, s := range genDecl.Specs {
+			typeSpec, ok := s.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+
+			structType, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				continue
+			}
+
+			// Parse parameters and request body from struct fields
+			b.parseRequestStruct(structType, operation)
+		}
+
 		// Add operation to path
 		if b.spec.Paths.PathItems[routeInfo.Path] == nil {
 			b.spec.Paths.PathItems[routeInfo.Path] = &spec.PathItem{}
@@ -196,8 +359,17 @@ func (b *Builder) parseRoutes(file *ast.File) error {
 	return nil
 }
 
-// parseModels parses swagger:model comments
+// parseModels parses swagger:model comments in two passes:
+// 1. First pass: register all model names (for $ref resolution)
+// 2. Second pass: parse struct fields
 func (b *Builder) parseModels(file *ast.File) error {
+	// First pass: collect all model type specs
+	type modelInfo struct {
+		name       string
+		structType *ast.StructType
+	}
+	var models []modelInfo
+
 	for _, decl := range file.Decls {
 		genDecl, ok := decl.(*ast.GenDecl)
 		if !ok || genDecl.Doc == nil {
@@ -216,15 +388,6 @@ func (b *Builder) parseModels(file *ast.File) error {
 				continue
 			}
 
-			// Parse struct type
-			structType, ok := typeSpec.Type.(*ast.StructType)
-			if !ok {
-				continue
-			}
-
-			// Create schema
-			schema := b.parseStruct(structType)
-
 			// Initialize Components if needed
 			if b.spec.Components == nil {
 				b.spec.Components = &spec.Components{}
@@ -233,9 +396,26 @@ func (b *Builder) parseModels(file *ast.File) error {
 				b.spec.Components.Schemas = make(map[string]*spec.Schema)
 			}
 
-			// Add schema to components
-			b.spec.Components.Schemas[typeSpec.Name.Name] = schema
+			// Register the model name first (with placeholder)
+			b.spec.Components.Schemas[typeSpec.Name.Name] = &spec.Schema{Type: "object"}
+
+			// Parse struct type
+			structType, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				continue
+			}
+
+			models = append(models, modelInfo{
+				name:       typeSpec.Name.Name,
+				structType: structType,
+			})
 		}
+	}
+
+	// Second pass: parse struct fields (now $refs can be resolved)
+	for _, model := range models {
+		schema := b.parseStruct(model.structType)
+		b.spec.Components.Schemas[model.name] = schema
 	}
 
 	return nil
@@ -248,6 +428,8 @@ func (b *Builder) parseStruct(structType *ast.StructType) *spec.Schema {
 		Properties: make(map[string]*spec.Schema),
 	}
 
+	var requiredFields []string
+
 	for _, field := range structType.Fields.List {
 		// Skip fields without names (embedded structs)
 		if len(field.Names) == 0 {
@@ -257,8 +439,19 @@ func (b *Builder) parseStruct(structType *ast.StructType) *spec.Schema {
 		// Create field schema
 		fieldSchema := b.parseFieldType(field.Type)
 
-		// Parse field tags (Description, Example, Format, etc.)
+		// Check if field is required from comments
+		isRequired := false
 		if field.Doc != nil {
+			for _, comment := range field.Doc.List {
+				text := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
+				lower := strings.ToLower(text)
+				if strings.HasPrefix(lower, "required:") {
+					val := strings.TrimSpace(text[9:])
+					isRequired = val == "true" || val == "yes"
+				}
+			}
+
+			// Parse field tags (Description, Example, Format, etc.)
 			if err := parsers.GlobalRegistry().Parse("swagger:model", field.Doc, fieldSchema, parsers.ContextField); err != nil {
 				// Ignore errors for now
 				_ = err
@@ -272,26 +465,104 @@ func (b *Builder) parseStruct(structType *ast.StructType) *spec.Schema {
 		}
 
 		schema.Properties[jsonName] = fieldSchema
+
+		// Track required fields
+		if isRequired {
+			requiredFields = append(requiredFields, jsonName)
+		}
+	}
+
+	// Set required array if there are required fields
+	if len(requiredFields) > 0 {
+		schema.Required = requiredFields
 	}
 
 	return schema
 }
 
-// parseFieldType parses a field type into a schema type
+// parseFieldType parses a field type into a schema type with format
 func (b *Builder) parseFieldType(expr ast.Expr) *spec.Schema {
 	schema := &spec.Schema{}
 
 	switch t := expr.(type) {
 	case *ast.Ident:
-		// Basic types
-		schema.Type = goTypeToJSONType(t.Name)
+		// Check if this type is an enum
+		if enumInfo := b.enumRegistry.GetByTypeName(t.Name); enumInfo != nil {
+			return b.createEnumSchema(enumInfo)
+		}
+
+		// Check if this is a known model type (use $ref)
+		if b.isModelType(t.Name) {
+			return &spec.Schema{
+				Ref: "#/components/schemas/" + t.Name,
+			}
+		}
+
+		// Basic types with format
+		switch t.Name {
+		case "string":
+			schema.Type = "string"
+		case "int":
+			schema.Type = "integer"
+		case "int8":
+			schema.Type = "integer"
+			schema.Format = "int8"
+		case "int16":
+			schema.Type = "integer"
+			schema.Format = "int16"
+		case "int32":
+			schema.Type = "integer"
+			schema.Format = "int32"
+		case "int64":
+			schema.Type = "integer"
+			schema.Format = "int64"
+		case "uint":
+			schema.Type = "integer"
+		case "uint8":
+			schema.Type = "integer"
+			schema.Format = "uint8"
+		case "uint16":
+			schema.Type = "integer"
+			schema.Format = "uint16"
+		case "uint32":
+			schema.Type = "integer"
+			schema.Format = "uint32"
+		case "uint64":
+			schema.Type = "integer"
+			schema.Format = "uint64"
+		case "float32":
+			schema.Type = "number"
+			schema.Format = "float"
+		case "float64":
+			schema.Type = "number"
+			schema.Format = "double"
+		case "bool":
+			schema.Type = "boolean"
+		default:
+			schema.Type = "object"
+		}
+
 	case *ast.ArrayType:
 		schema.Type = "array"
 		schema.Items = b.parseFieldType(t.Elt)
+
 	case *ast.StarExpr:
 		// Pointer type
 		return b.parseFieldType(t.X)
+
 	case *ast.SelectorExpr:
+		// Check if this qualified type is an enum (e.g., pkg.EnumType)
+		if enumInfo := b.enumRegistry.GetByTypeName(t.Sel.Name); enumInfo != nil {
+			return b.createEnumSchema(enumInfo)
+		}
+
+		// Check if this is a known model type (use $ref)
+		if b.isModelType(t.Sel.Name) {
+			return &spec.Schema{
+				Ref: "#/components/schemas/" + t.Sel.Name,
+			}
+		}
+
 		// External type (e.g., time.Time)
 		if ident, ok := t.X.(*ast.Ident); ok {
 			if ident.Name == "time" && t.Sel.Name == "Time" {
@@ -299,6 +570,41 @@ func (b *Builder) parseFieldType(expr ast.Expr) *spec.Schema {
 				schema.Format = "date-time"
 			}
 		}
+
+	case *ast.MapType:
+		schema.Type = "object"
+		if t.Value != nil {
+			schema.AdditionalProperties = b.parseFieldType(t.Value)
+		}
+	}
+
+	return schema
+}
+
+// isModelType checks if a type name is a registered model
+func (b *Builder) isModelType(typeName string) bool {
+	if b.spec.Components == nil || b.spec.Components.Schemas == nil {
+		return false
+	}
+	_, exists := b.spec.Components.Schemas[typeName]
+	return exists
+}
+
+// createEnumSchema creates a schema for an enum type with inline values
+func (b *Builder) createEnumSchema(enumInfo *spec.EnumInfo) *spec.Schema {
+	schema := &spec.Schema{
+		Type:        enumInfo.BaseType,
+		Description: enumInfo.Description,
+	}
+
+	// Add enum values
+	if len(enumInfo.Values) > 0 {
+		schema.Enum = enumInfo.GetEnumValues()
+	}
+
+	// Add example if available
+	if enumInfo.Example != nil {
+		schema.Example = enumInfo.Example
 	}
 
 	return schema

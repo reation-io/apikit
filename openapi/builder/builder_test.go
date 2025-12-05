@@ -174,3 +174,169 @@ func TestBuilder_JSON(t *testing.T) {
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || (len(s) > 0 && (s[0:len(substr)] == substr || contains(s[1:], substr))))
 }
+
+func TestNewBuilderWithOptions(t *testing.T) {
+	t.Run("default options", func(t *testing.T) {
+		builder := NewBuilderWithOptions()
+
+		if builder.config == nil {
+			t.Fatal("expected config to be set")
+		}
+		if builder.spec == nil {
+			t.Fatal("expected spec to be initialized")
+		}
+		if builder.spec.OpenAPI != "3.0.3" {
+			t.Errorf("expected OpenAPI version '3.0.3', got %q", builder.spec.OpenAPI)
+		}
+	})
+
+	t.Run("with pattern option enables scanner", func(t *testing.T) {
+		builder := NewBuilderWithOptions(
+			WithPattern("./..."),
+		)
+
+		if !builder.config.UseScanner {
+			t.Error("expected UseScanner to be true when WithPattern is used")
+		}
+		if builder.config.ScannerConfig.Pattern != "./..." {
+			t.Errorf("expected pattern './...', got %q", builder.config.ScannerConfig.Pattern)
+		}
+	})
+
+	t.Run("with dir option", func(t *testing.T) {
+		builder := NewBuilderWithOptions(
+			WithDir("/project"),
+		)
+
+		if !builder.config.UseScanner {
+			t.Error("expected UseScanner to be true when WithDir is used")
+		}
+		if builder.config.ScannerConfig.Dir != "/project" {
+			t.Errorf("expected dir '/project', got %q", builder.config.ScannerConfig.Dir)
+		}
+	})
+
+	t.Run("with ignore paths", func(t *testing.T) {
+		builder := NewBuilderWithOptions(
+			WithPattern("./..."),
+			WithIgnorePaths("vendor/**", "test/**"),
+		)
+
+		if len(builder.config.ScannerConfig.IgnorePaths) != 2 {
+			t.Errorf("expected 2 ignore paths, got %d", len(builder.config.ScannerConfig.IgnorePaths))
+		}
+	})
+
+	t.Run("with validation", func(t *testing.T) {
+		builder := NewBuilderWithOptions(
+			WithValidation(true),
+		)
+
+		if !builder.config.Validation {
+			t.Error("expected Validation to be true")
+		}
+	})
+
+	t.Run("with legacy patterns", func(t *testing.T) {
+		builder := NewBuilderWithOptions(
+			WithLegacyPatterns("*.go", "handlers/*.go"),
+		)
+
+		if builder.config.UseScanner {
+			t.Error("expected UseScanner to be false when WithLegacyPatterns is used")
+		}
+		if len(builder.config.Patterns) != 2 {
+			t.Errorf("expected 2 patterns, got %d", len(builder.config.Patterns))
+		}
+	})
+}
+
+func TestBuilder_WithScanner(t *testing.T) {
+	t.Run("scan current package", func(t *testing.T) {
+		// This test scans the builder package itself
+		builder := NewBuilderWithOptions(
+			WithPattern("."),
+			WithDir("."),
+		)
+
+		spec, err := builder.Build()
+		if err != nil {
+			t.Fatalf("failed to build with scanner: %v", err)
+		}
+
+		// The spec should be valid even if no swagger annotations are found
+		if spec == nil {
+			t.Fatal("expected spec to be returned")
+		}
+		if spec.OpenAPI != "3.0.3" {
+			t.Errorf("expected OpenAPI version '3.0.3', got %q", spec.OpenAPI)
+		}
+	})
+}
+
+func TestBuilder_Validation(t *testing.T) {
+	t.Run("validation enabled catches errors", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create a test file with invalid route (operation without responses)
+		testFile := filepath.Join(tmpDir, "api.go")
+		content := `package main
+
+// swagger:route GET /users users listUsers
+// Summary: List all users
+type ListUsersRequest struct{}
+`
+		if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		builder := NewBuilderWithOptions(
+			WithLegacyPatterns(filepath.Join(tmpDir, "*.go")),
+			WithValidation(true),
+		)
+
+		_, err := builder.Build()
+		if err == nil {
+			t.Error("expected validation error for operation without responses")
+		}
+	})
+
+	t.Run("validation disabled allows invalid spec", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create a test file with invalid spec (missing title)
+		testFile := filepath.Join(tmpDir, "api.go")
+		content := `package main
+
+// swagger:meta
+// Version: 1.0.0
+type API struct{}
+`
+		if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		builder := NewBuilderWithOptions(
+			WithLegacyPatterns(filepath.Join(tmpDir, "*.go")),
+			WithValidation(false),
+		)
+
+		spec, err := builder.Build()
+		if err != nil {
+			t.Fatalf("build failed: %v", err)
+		}
+		if spec == nil {
+			t.Error("expected spec to be returned")
+		}
+	})
+
+	t.Run("Validate method returns result", func(t *testing.T) {
+		builder := NewBuilder()
+		// Default spec should be valid
+		result := builder.Validate()
+
+		if result == nil {
+			t.Error("expected validation result")
+		}
+	})
+}

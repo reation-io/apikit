@@ -35,10 +35,11 @@ type Schema struct {
 	Items *Schema `json:"items,omitempty" yaml:"items,omitempty"`
 
 	// Composition
-	AllOf []*Schema `json:"allOf,omitempty" yaml:"allOf,omitempty"`
-	OneOf []*Schema `json:"oneOf,omitempty" yaml:"oneOf,omitempty"`
-	AnyOf []*Schema `json:"anyOf,omitempty" yaml:"anyOf,omitempty"`
-	Not   *Schema   `json:"not,omitempty" yaml:"not,omitempty"`
+	AllOf         []*Schema      `json:"allOf,omitempty" yaml:"allOf,omitempty"`
+	OneOf         []*Schema      `json:"oneOf,omitempty" yaml:"oneOf,omitempty"`
+	AnyOf         []*Schema      `json:"anyOf,omitempty" yaml:"anyOf,omitempty"`
+	Not           *Schema        `json:"not,omitempty" yaml:"not,omitempty"`
+	Discriminator *Discriminator `json:"discriminator,omitempty" yaml:"discriminator,omitempty"`
 
 	// Reference
 	Ref string `json:"$ref,omitempty" yaml:"$ref,omitempty"`
@@ -58,4 +59,12 @@ type XML struct {
 	Prefix    string `json:"prefix,omitempty" yaml:"prefix,omitempty"`
 	Attribute bool   `json:"attribute,omitempty" yaml:"attribute,omitempty"`
 	Wrapped   bool   `json:"wrapped,omitempty" yaml:"wrapped,omitempty"`
+}
+
+// Discriminator is used with oneOf/anyOf to disambiguate which schema to apply
+type Discriminator struct {
+	// PropertyName is the name of the property in the payload that will hold the discriminator value
+	PropertyName string `json:"propertyName" yaml:"propertyName"`
+	// Mapping maps values to schema references
+	Mapping map[string]string `json:"mapping,omitempty" yaml:"mapping,omitempty"`
 }

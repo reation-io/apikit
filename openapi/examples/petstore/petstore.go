@@ -3,7 +3,11 @@ package petstore
 // swagger:meta
 // title: Swagger Petstore - OpenAPI 3.0
 // version: 1.0.12
-// description:
+// TermsOfService: https://swagger.io/terms/
+type PetstoreMeta struct{}
+
+// swagger:meta
+// Description:
 //
 //	This is a sample Pet Store Server based on the OpenAPI 3.0 specification.  You can find out more about
 //	Swagger at [https://swagger.io](https://swagger.io). In the third iteration of the pet store, we've switched to the design first approach!
@@ -13,7 +17,61 @@ package petstore
 //	Some useful links:
 //	- [The Pet Store repository](https://github.com/swagger-api/swagger-petstore)
 //	- [The source API definition for the Pet Store](https://github.com/swagger-api/swagger-petstore/blob/master/src/main/resources/openapi.yaml)
-type PetstoreMeta struct{}
+type DescriptionMeta struct{}
+
+// swagger:meta
+// Servers:
+//   - url: https://petstore3.swagger.io/api/v3
+type ServersMeta struct{}
+
+// swagger:meta
+// SecuritySchemes:
+//   petstore_auth:
+//     type: oauth2
+//     flows:
+//       implicit:
+//         authorizationUrl: https://petstore3.swagger.io/oauth/authorize
+//         scopes:
+//           write:pets: modify pets in your account
+//           read:pets: read your pets
+//   api_key:
+//     type: apiKey
+//     name: api_key
+//     in: header
+type SecuritySchemesMeta struct{}
+
+// swagger:meta
+// Contact:
+//   email: apiteam@swagger.io
+type ContactMeta struct{}
+
+// swagger:meta
+// License:
+//   name: Apache 2.0
+//   url: https://www.apache.org/licenses/LICENSE-2.0.html
+type LicenseMeta struct{}
+
+// swagger:meta
+// ExternalDocs:
+//   description: Find out more about Swagger
+//   url: https://swagger.io
+type ExternalDocsMeta struct{}
+
+// swagger:meta
+// GlobalTags:
+//   - name: pet
+//     description: Everything about your Pets
+//     externalDocs:
+//       description: Find out more
+//       url: https://swagger.io
+//   - name: store
+//     description: Access to Petstore orders
+//     externalDocs:
+//       description: Find out more about our store
+//       url: https://swagger.io
+//   - name: user
+//     description: Operations about user
+type GlobalTagsMeta struct{}
 
 // ============================================================================
 // MODELS

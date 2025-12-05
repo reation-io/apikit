@@ -57,20 +57,50 @@ func (p *YAMLParser) Parse(comments *ast.CommentGroup, ctx parsers.ParseContext)
 	// Extract YAML content
 	yamlContent := matches[1]
 
-	// Clean comment indentation
+	// Clean comment indentation while preserving relative indentation
 	lines := strings.Split(yamlContent, "\n")
 	cleaned := make([]string, 0, len(lines))
 
+	// Find minimum indentation (excluding empty lines)
+	minIndent := -1
 	for _, line := range lines {
-		// Remove comment prefixes (//,  /*, etc.)
-		trimmed := strings.TrimSpace(line)
-		trimmed = strings.TrimPrefix(trimmed, "//")
-		trimmed = strings.TrimPrefix(trimmed, "/*")
-		trimmed = strings.TrimPrefix(trimmed, "*")
-		trimmed = strings.TrimSpace(trimmed)
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if minIndent < 0 || indent < minIndent {
+			minIndent = indent
+		}
+	}
+	if minIndent < 0 {
+		minIndent = 0
+	}
 
-		if trimmed != "" {
-			cleaned = append(cleaned, trimmed)
+	for _, line := range lines {
+		// Skip empty lines
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		// Remove common indentation
+		if len(line) >= minIndent {
+			line = line[minIndent:]
+		}
+
+		// Remove comment prefix if still present (after comments.Text())
+		if strings.HasPrefix(strings.TrimSpace(line), "//") {
+			// Strip leading whitespace, //, then recalculate indent
+			trimmed := strings.TrimSpace(line)
+			trimmed = strings.TrimPrefix(trimmed, "//")
+			// Count original leading spaces after removing //
+			if len(trimmed) > 0 && trimmed[0] == ' ' {
+				trimmed = trimmed[1:] // Remove single space after //
+			}
+			line = trimmed
+		}
+
+		if strings.TrimSpace(line) != "" {
+			cleaned = append(cleaned, line)
 		}
 	}
 

@@ -10,6 +10,12 @@ const (
 
 	// DirectiveModel defines data models (schemas)
 	DirectiveModel = "swagger:model"
+
+	// DirectiveEnum defines enumeration types
+	DirectiveEnum = "swagger:enum"
+
+	// DirectiveParameters defines parameter structs
+	DirectiveParameters = "swagger:parameters"
 )
 
 // Meta-level Tags (swagger:meta)
@@ -72,6 +78,11 @@ const (
 	TagRequired  = "Required"
 	TagReadOnly  = "ReadOnly"
 	TagWriteOnly = "WriteOnly"
+
+	// Composition
+	TagOneOf = "oneOf"
+	TagAllOf = "allOf"
+	TagAnyOf = "anyOf"
 
 	// Extensions
 	TagExtensions = "Extensions"

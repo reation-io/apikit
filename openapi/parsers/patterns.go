@@ -9,10 +9,10 @@ var (
 	// Meta-level patterns (swagger:meta) - single line patterns
 	RxVersion        = regexp.MustCompile(`(?i)Version\s*:\s*([^\n]+)`)
 	RxTitle          = regexp.MustCompile(`(?i)Title\s*:\s*([^\n]+)`)
-	RxDescription    = regexp.MustCompile(`(?is)Description\s*:\s*(.*)`) // Multi-line
+	RxDescription    = regexp.MustCompile(`(?ms)^Description\s*:\s*$(.*?)(?:^[A-Z][a-zA-Z]*\s*:|\z)`) // Multi-line, case-sensitive, starts at beginning of line
 	RxTermsOfService = regexp.MustCompile(`(?i)TermsOfService\s*:\s*([^\n]+)`)
-	RxContact        = regexp.MustCompile(`(?i)Contact\s*:\s*([^\n]+)`)
-	RxLicense        = regexp.MustCompile(`(?i)License\s*:\s*([^\n]+)`)
+	RxContact        = regexp.MustCompile(`(?is)Contact\s*:\s*\n((?:.*\n?)*)`)
+	RxLicense        = regexp.MustCompile(`(?is)License\s*:\s*\n((?:.*\n?)*)`)
 	RxHost           = regexp.MustCompile(`(?i)Host\s*:\s*([^\n]+)`)
 	RxBasePath       = regexp.MustCompile(`(?i)BasePath\s*:\s*([^\n]+)`)
 	RxSchemes        = regexp.MustCompile(`(?i)Schemes\s*:\s*([^\n]+)`)
@@ -47,6 +47,12 @@ var (
 	RxRequired  = regexp.MustCompile(`(?i)Required\s*:\s*(true|false|yes|no)`)
 	RxReadOnly  = regexp.MustCompile(`(?i)ReadOnly\s*:\s*(true|false|yes|no)`)
 	RxWriteOnly = regexp.MustCompile(`(?i)WriteOnly\s*:\s*(true|false|yes|no)`)
+
+	// External docs patterns
+	RxExternalDocs = regexp.MustCompile(`(?is)ExternalDocs\s*:\s*\n((?:.*\n?)*)`)
+
+	// Global Tags patterns (for swagger:meta)
+	RxGlobalTags = regexp.MustCompile(`(?is)GlobalTags\s*:\s*\n((?:.*\n?)*)`)
 
 	// Extension patterns
 	RxExtensions = regexp.MustCompile(`(?is)Extensions\s*:\s*\n((?:.*\n?)*)`)
