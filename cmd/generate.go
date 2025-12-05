@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"fmt"
@@ -56,7 +56,6 @@ func init() {
 
 func runGenerate(cmd *cobra.Command, args []string) error {
 	// Check for APIKIT_FORCE environment variable
-	// This allows: APIKIT_FORCE=1 go generate ./internal/...
 	if !force && os.Getenv("APIKIT_FORCE") != "" {
 		force = true
 	}

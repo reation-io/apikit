@@ -8,7 +8,6 @@ require (
 	github.com/go-playground/validator/v10 v10.28.0
 	github.com/spf13/cobra v1.10.1
 	golang.org/x/tools v0.39.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

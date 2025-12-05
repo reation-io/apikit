@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"fmt"
@@ -38,12 +38,13 @@ Example:
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-func Execute() {
+func main() {
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+
 }
 
 func init() {
