@@ -340,3 +340,54 @@ type API struct{}
 		}
 	})
 }
+
+func TestBuilder_SwaggerIgnore(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("ignores fields in models", func(t *testing.T) {
+		testFile := filepath.Join(tmpDir, "models.go")
+		content := `package test
+
+// User represents a user in the system
+// swagger:model
+type User struct {
+	// ID of the user
+	ID string ` + "`json:\"id\"`" + `
+
+	// Name of the user
+	Name string ` + "`json:\"name\"`" + `
+
+	// swagger:ignore
+	// Internal token - should not appear in spec
+	InternalToken string ` + "`json:\"internal_token\"`" + `
+}
+`
+		if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+		openapi, err := builder.Build()
+		if err != nil {
+			t.Fatalf("failed to build spec: %v", err)
+		}
+
+		schema := openapi.Components.Schemas["User"]
+		if schema == nil {
+			t.Fatal("expected User schema")
+		}
+
+		// Check that id and name are present
+		if _, ok := schema.Properties["id"]; !ok {
+			t.Error("expected 'id' property")
+		}
+		if _, ok := schema.Properties["name"]; !ok {
+			t.Error("expected 'name' property")
+		}
+
+		// Check that internal_token is NOT present
+		if _, ok := schema.Properties["internal_token"]; ok {
+			t.Error("'internal_token' should be ignored via swagger:ignore")
+		}
+	})
+}

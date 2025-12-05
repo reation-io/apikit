@@ -11,8 +11,23 @@ import (
 
 // parseRequestStruct extracts parameters and request body from a struct following swagger:route
 func (b *Builder) parseRequestStruct(structType *ast.StructType, operation *spec.Operation) {
+	b.parseRequestStructWithIgnored(structType, operation, nil)
+}
+
+// parseRequestStructWithIgnored extracts parameters, filtering out ignored ones
+func (b *Builder) parseRequestStructWithIgnored(structType *ast.StructType, operation *spec.Operation, ignoredParams []string) {
 	if structType == nil || structType.Fields == nil {
 		return
+	}
+
+	// Build a map for quick lookup of ignored parameters
+	ignoredMap := make(map[string]bool)
+	for _, p := range ignoredParams {
+		ignoredMap[p] = true
+	}
+	// Also add ignored parameters from operation
+	for _, p := range operation.IgnoredParameters {
+		ignoredMap[p] = true
 	}
 
 	for _, field := range structType.Fields.List {
@@ -21,6 +36,11 @@ func (b *Builder) parseRequestStruct(structType *ast.StructType, operation *spec
 		}
 
 		fieldName := field.Names[0].Name
+
+		// Check for swagger:ignore directive in field comments
+		if hasSwaggerIgnore(field.Doc) {
+			continue
+		}
 
 		// Parse field comments for in: directive
 		inValue := ""
@@ -84,6 +104,11 @@ func (b *Builder) parseRequestStruct(structType *ast.StructType, operation *spec
 		paramName := b.getParameterName(field)
 		if paramName == "" {
 			paramName = strings.ToLower(fieldName[:1]) + fieldName[1:]
+		}
+
+		// Check if this parameter should be ignored
+		if ignoredMap[paramName] || ignoredMap[fieldName] {
+			continue
 		}
 
 		// Path parameters are always required
@@ -371,3 +396,18 @@ func parseBoolValue(s string) (bool, bool) {
 
 // descriptionPattern matches description lines (not directives)
 var descriptionPattern = regexp.MustCompile(`^[A-Z]`)
+
+// hasSwaggerIgnore checks if a comment group contains swagger:ignore directive
+func hasSwaggerIgnore(comments *ast.CommentGroup) bool {
+	if comments == nil {
+		return false
+	}
+	for _, comment := range comments.List {
+		text := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
+		lower := strings.ToLower(text)
+		if lower == "swagger:ignore" || strings.HasPrefix(lower, "swagger:ignore ") {
+			return true
+		}
+	}
+	return false
+}

@@ -855,6 +855,11 @@
     "schemas": {
       "ApiResponse": {
         "type": "object",
+        "required": [
+          "code",
+          "type",
+          "message"
+        ],
         "properties": {
           "code": {
             "type": "integer",
@@ -870,6 +875,10 @@
       },
       "Category": {
         "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -902,6 +911,11 @@
       },
       "Order": {
         "type": "object",
+        "required": [
+          "id",
+          "petId",
+          "quantity"
+        ],
         "properties": {
           "complete": {
             "type": "boolean"
@@ -933,12 +947,14 @@
       "Pet": {
         "type": "object",
         "required": [
+          "id",
           "name",
           "photoUrls"
         ],
         "properties": {
           "category": {
-            "$ref": "#/components/schemas/Category"
+            "$ref": "#/components/schemas/Category",
+            "nullable": true
           },
           "id": {
             "type": "integer",
@@ -971,6 +987,9 @@
       },
       "SuccessResponse": {
         "type": "object",
+        "required": [
+          "message"
+        ],
         "properties": {
           "message": {
             "type": "string"
@@ -979,6 +998,10 @@
       },
       "Tag": {
         "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -991,6 +1014,16 @@
       },
       "User": {
         "type": "object",
+        "required": [
+          "id",
+          "username",
+          "firstName",
+          "lastName",
+          "email",
+          "password",
+          "phone",
+          "userStatus"
+        ],
         "properties": {
           "email": {
             "type": "string",

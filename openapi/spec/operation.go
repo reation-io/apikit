@@ -1,5 +1,10 @@
 package spec
 
+import (
+	"maps"
+	"slices"
+)
+
 // Operation describe una operación en un path
 type Operation struct {
 	Tags         []string              `json:"tags,omitempty" yaml:"tags,omitempty"`
@@ -15,6 +20,14 @@ type Operation struct {
 	Security     []SecurityRequirement `json:"security,omitempty" yaml:"security,omitempty"`
 	Servers      []*Server             `json:"servers,omitempty" yaml:"servers,omitempty"`
 	Extensions   map[string]any        `json:"-" yaml:"-"` // Extensions for custom properties
+
+	// Internal fields (not serialized)
+	IgnoredParameters []string `json:"-" yaml:"-"` // Parameters to ignore from request struct
+}
+
+// HasIgnoredParameter checks if a parameter should be ignored
+func (o *Operation) HasIgnoredParameter(name string) bool {
+	return slices.Contains(o.IgnoredParameters, name)
 }
 
 // Parameter describe un parámetro de operación
@@ -85,9 +98,7 @@ type Responses struct {
 // MarshalJSON implementa json.Marshaler
 func (r *Responses) MarshalJSON() ([]byte, error) {
 	m := make(map[string]*Response)
-	for k, v := range r.StatusCodeResponses {
-		m[k] = v
-	}
+	maps.Copy(m, r.StatusCodeResponses)
 	if r.Default != nil {
 		m["default"] = r.Default
 	}
@@ -97,9 +108,7 @@ func (r *Responses) MarshalJSON() ([]byte, error) {
 // MarshalYAML implementa yaml.Marshaler
 func (r *Responses) MarshalYAML() (any, error) {
 	m := make(map[string]*Response)
-	for k, v := range r.StatusCodeResponses {
-		m[k] = v
-	}
+	maps.Copy(m, r.StatusCodeResponses)
 	if r.Default != nil {
 		m["default"] = r.Default
 	}

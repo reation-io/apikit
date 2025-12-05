@@ -21,6 +21,7 @@ import (
 // Builder builds an OpenAPI specification from Go source files
 type Builder struct {
 	spec         *spec.OpenAPI
+	document     *spec.OpenAPI // alias for spec (used by embedded.go)
 	fset         *token.FileSet
 	patterns     []string // File patterns to scan (legacy mode)
 	config       *BuilderConfig
@@ -35,17 +36,19 @@ func NewBuilder(patterns ...string) *Builder {
 		patterns = []string{"**/*.go"}
 	}
 
-	return &Builder{
-		spec: &spec.OpenAPI{
-			OpenAPI: "3.0.3",
-			Info: &spec.Info{
-				Title:   "API",
-				Version: "1.0.0",
-			},
-			Paths: &spec.Paths{
-				PathItems: make(map[string]*spec.PathItem),
-			},
+	openAPISpec := &spec.OpenAPI{
+		OpenAPI: "3.0.3",
+		Info: &spec.Info{
+			Title:   "API",
+			Version: "1.0.0",
 		},
+		Paths: &spec.Paths{
+			PathItems: make(map[string]*spec.PathItem),
+		},
+	}
+	return &Builder{
+		spec:     openAPISpec,
+		document: openAPISpec,
 		fset:     token.NewFileSet(),
 		patterns: patterns,
 		config: &BuilderConfig{
@@ -81,17 +84,19 @@ func NewBuilderWithOptions(opts ...Option) *Builder {
 		config.Patterns = []string{"**/*.go"}
 	}
 
-	return &Builder{
-		spec: &spec.OpenAPI{
-			OpenAPI: "3.0.3",
-			Info: &spec.Info{
-				Title:   "API",
-				Version: "1.0.0",
-			},
-			Paths: &spec.Paths{
-				PathItems: make(map[string]*spec.PathItem),
-			},
+	openAPISpec := &spec.OpenAPI{
+		OpenAPI: "3.0.3",
+		Info: &spec.Info{
+			Title:   "API",
+			Version: "1.0.0",
 		},
+		Paths: &spec.Paths{
+			PathItems: make(map[string]*spec.PathItem),
+		},
+	}
+	return &Builder{
+		spec:         openAPISpec,
+		document:     openAPISpec,
 		fset:         token.NewFileSet(),
 		patterns:     config.Patterns,
 		config:       config,
@@ -431,16 +436,51 @@ func (b *Builder) parseStruct(structType *ast.StructType) *spec.Schema {
 	var requiredFields []string
 
 	for _, field := range structType.Fields.List {
-		// Skip fields without names (embedded structs)
+		// Check for swagger:ignore directive
+		if hasSwaggerIgnore(field.Doc) {
+			continue
+		}
+
+		// Handle embedded fields (no name)
 		if len(field.Names) == 0 {
+			embeddedSchema := b.resolveEmbeddedSchema(field.Type)
+			if embeddedSchema != nil && embeddedSchema.Properties != nil {
+				// Merge embedded schema properties
+				for propName, propSchema := range embeddedSchema.Properties {
+					if _, exists := schema.Properties[propName]; !exists {
+						schema.Properties[propName] = propSchema
+					}
+				}
+				// Merge embedded required fields
+				for _, req := range embeddedSchema.Required {
+					if !containsString(requiredFields, req) {
+						requiredFields = append(requiredFields, req)
+					}
+				}
+			}
 			continue
 		}
 
 		// Create field schema
 		fieldSchema := b.parseFieldType(field.Type)
 
-		// Check if field is required from comments
+		// Check for nullable (pointer types)
+		if _, ok := field.Type.(*ast.StarExpr); ok {
+			fieldSchema.Nullable = true
+		}
+
+		// Check if field is required from comments or struct tags
 		isRequired := false
+		hasOmitempty := false
+
+		// Check struct tags for omitempty
+		if field.Tag != nil {
+			tagStr := strings.Trim(field.Tag.Value, "`")
+			if strings.Contains(tagStr, "omitempty") || strings.Contains(tagStr, "omitzero") {
+				hasOmitempty = true
+			}
+		}
+
 		if field.Doc != nil {
 			for _, comment := range field.Doc.List {
 				text := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
@@ -466,8 +506,8 @@ func (b *Builder) parseStruct(structType *ast.StructType) *spec.Schema {
 
 		schema.Properties[jsonName] = fieldSchema
 
-		// Track required fields
-		if isRequired {
+		// Track required fields (required explicitly OR non-pointer without omitempty)
+		if isRequired || (!hasOmitempty && !fieldSchema.Nullable) {
 			requiredFields = append(requiredFields, jsonName)
 		}
 	}
@@ -478,6 +518,38 @@ func (b *Builder) parseStruct(structType *ast.StructType) *spec.Schema {
 	}
 
 	return schema
+}
+
+// resolveEmbeddedSchema resolves an embedded type to its schema
+func (b *Builder) resolveEmbeddedSchema(expr ast.Expr) *spec.Schema {
+	// Handle pointer types
+	if starExpr, ok := expr.(*ast.StarExpr); ok {
+		return b.resolveEmbeddedSchema(starExpr.X)
+	}
+
+	// Get the type name
+	var typeName string
+	switch t := expr.(type) {
+	case *ast.Ident:
+		typeName = t.Name
+	case *ast.SelectorExpr:
+		if ident, ok := t.X.(*ast.Ident); ok {
+			typeName = ident.Name + "." + t.Sel.Name
+		}
+	}
+
+	if typeName == "" {
+		return nil
+	}
+
+	// Look up the schema in components
+	if b.spec.Components != nil && b.spec.Components.Schemas != nil {
+		if schema, ok := b.spec.Components.Schemas[typeName]; ok {
+			return schema
+		}
+	}
+
+	return nil
 }
 
 // parseFieldType parses a field type into a schema type with format
@@ -576,6 +648,10 @@ func (b *Builder) parseFieldType(expr ast.Expr) *spec.Schema {
 		if t.Value != nil {
 			schema.AdditionalProperties = b.parseFieldType(t.Value)
 		}
+
+	case *ast.StructType:
+		// Inline struct - parse it directly
+		schema = b.parseStruct(t)
 	}
 
 	return schema
