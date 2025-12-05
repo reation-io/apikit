@@ -68,7 +68,7 @@ func (b *Builder) extractParameters(structType *ast.StructType, ignoredParams []
 		fieldName := field.Names[0].Name
 
 		// Check for swagger:ignore directive in field comments
-		if hasSwaggerIgnore(field.Doc) {
+		if hasSwaggerIgnore(field.Doc) || hasSwaggerIgnore(field.Comment) {
 			continue
 		}
 

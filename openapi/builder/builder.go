@@ -397,7 +397,7 @@ func (b *Builder) parseStruct(structType *ast.StructType) *spec.Schema {
 
 	for _, field := range structType.Fields.List {
 		// Check for swagger:ignore directive
-		if hasSwaggerIgnore(field.Doc) {
+		if hasSwaggerIgnore(field.Doc) || hasSwaggerIgnore(field.Comment) {
 			continue
 		}
 
