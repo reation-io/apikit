@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reation-io/apikit/handler/parser"
+	"github.com/reation-io/apikit/core/definition"
 )
 
 func TestQueryExtractor_Name(t *testing.T) {
@@ -26,22 +26,22 @@ func TestQueryExtractor_CanExtract(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		field    *parser.Field
+		field    *definition.Field
 		expected bool
 	}{
 		{
 			name:     "with query tag",
-			field:    &parser.Field{StructTag: `query:"search"`},
+			field:    &definition.Field{Tags: `query:"search"`},
 			expected: true,
 		},
 		{
 			name:     "with in:query comment",
-			field:    &parser.Field{InComment: "query"},
+			field:    &definition.Field{Metadata: map[string]string{"in": "query"}},
 			expected: true,
 		},
 		{
 			name:     "without query tag or comment",
-			field:    &parser.Field{StructTag: `json:"search"`},
+			field:    &definition.Field{Tags: `json:"search"`},
 			expected: false,
 		},
 	}
@@ -59,10 +59,10 @@ func TestQueryExtractor_CanExtract(t *testing.T) {
 func TestQueryExtractor_GenerateCode_SingleValue(t *testing.T) {
 	e := &QueryExtractor{}
 
-	field := &parser.Field{
-		Name:      "Search",
-		Type:      "string",
-		StructTag: `query:"q"`,
+	field := &definition.Field{
+		Name: "Search",
+		Type: &definition.Type{GoType: "string", Kind: "primitive"},
+		Tags: `query:"q"`,
 	}
 
 	code, _ := e.GenerateCode(field, "Request")
@@ -82,12 +82,14 @@ func TestQueryExtractor_GenerateCode_SingleValue(t *testing.T) {
 func TestQueryExtractor_GenerateCode_Slice(t *testing.T) {
 	e := &QueryExtractor{}
 
-	field := &parser.Field{
-		Name:      "Tags",
-		Type:      "[]string",
-		IsSlice:   true,
-		SliceType: "string",
-		StructTag: `query:"tags"`,
+	field := &definition.Field{
+		Name: "Tags",
+		Type: &definition.Type{
+			GoType:      "[]string",
+			Kind:        "slice",
+			ElementType: &definition.Type{GoType: "string", Kind: "primitive"},
+		},
+		Tags: `query:"tags"`,
 	}
 
 	code, _ := e.GenerateCode(field, "Request")
@@ -107,12 +109,14 @@ func TestQueryExtractor_GenerateCode_Slice(t *testing.T) {
 func TestQueryExtractor_GenerateCode_IntSlice(t *testing.T) {
 	e := &QueryExtractor{}
 
-	field := &parser.Field{
-		Name:      "IDs",
-		Type:      "[]int",
-		IsSlice:   true,
-		SliceType: "int",
-		StructTag: `query:"ids"`,
+	field := &definition.Field{
+		Name: "IDs",
+		Type: &definition.Type{
+			GoType:      "[]int",
+			Kind:        "slice",
+			ElementType: &definition.Type{GoType: "int", Kind: "primitive"},
+		},
+		Tags: `query:"ids"`,
 	}
 
 	code, imports := e.GenerateCode(field, "Request")

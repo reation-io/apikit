@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reation-io/apikit/handler/parser"
+	"github.com/reation-io/apikit/core/definition"
 )
 
 func TestPathExtractor_Name(t *testing.T) {
@@ -26,22 +26,22 @@ func TestPathExtractor_CanExtract(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		field    *parser.Field
+		field    *definition.Field
 		expected bool
 	}{
 		{
 			name:     "with path tag",
-			field:    &parser.Field{StructTag: `path:"id"`},
+			field:    &definition.Field{Tags: `path:"id"`},
 			expected: true,
 		},
 		{
 			name:     "with in:path comment",
-			field:    &parser.Field{InComment: "path"},
+			field:    &definition.Field{Metadata: map[string]string{"in": "path"}},
 			expected: true,
 		},
 		{
 			name:     "without path tag or comment",
-			field:    &parser.Field{StructTag: `json:"id"`},
+			field:    &definition.Field{Tags: `json:"id"`},
 			expected: false,
 		},
 	}
@@ -61,15 +61,15 @@ func TestPathExtractor_GenerateCode(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		field          *parser.Field
+		field          *definition.Field
 		expectedInCode []string
 	}{
 		{
 			name: "string field",
-			field: &parser.Field{
-				Name:      "UserID",
-				Type:      "string",
-				StructTag: `path:"userId"`,
+			field: &definition.Field{
+				Name: "UserID",
+				Type: &definition.Type{GoType: "string", Kind: "primitive"},
+				Tags: `path:"userId"`,
 			},
 			expectedInCode: []string{
 				`r.PathValue("userId")`,
@@ -78,10 +78,10 @@ func TestPathExtractor_GenerateCode(t *testing.T) {
 		},
 		{
 			name: "int field",
-			field: &parser.Field{
-				Name:      "ID",
-				Type:      "int64",
-				StructTag: `path:"id"`,
+			field: &definition.Field{
+				Name: "ID",
+				Type: &definition.Type{GoType: "int64", Kind: "primitive"},
+				Tags: `path:"id"`,
 			},
 			expectedInCode: []string{
 				`r.PathValue("id")`,
@@ -91,11 +91,10 @@ func TestPathExtractor_GenerateCode(t *testing.T) {
 		},
 		{
 			name: "field with comment name",
-			field: &parser.Field{
-				Name:          "UserID",
-				Type:          "string",
-				InComment:     "path",
-				InCommentName: "user_id",
+			field: &definition.Field{
+				Name:     "UserID",
+				Type:     &definition.Type{GoType: "string", Kind: "primitive"},
+				Metadata: map[string]string{"in": "path", "in_name": "user_id"},
 			},
 			expectedInCode: []string{
 				`r.PathValue("user_id")`,
@@ -121,10 +120,10 @@ func TestPathExtractor_GenerateCode_Imports(t *testing.T) {
 	e := &PathExtractor{}
 
 	// Int field should require strconv import
-	field := &parser.Field{
-		Name:      "ID",
-		Type:      "int",
-		StructTag: `path:"id"`,
+	field := &definition.Field{
+		Name: "ID",
+		Type: &definition.Type{GoType: "int", Kind: "primitive"},
+		Tags: `path:"id"`,
 	}
 
 	_, imports := e.GenerateCode(field, "Request")

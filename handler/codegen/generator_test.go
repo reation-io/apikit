@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reation-io/apikit/handler/parser"
+	"github.com/reation-io/apikit/core/definition"
 )
 
 func TestNew(t *testing.T) {
@@ -29,12 +29,10 @@ func TestGenerate_NoHandlers(t *testing.T) {
 		t.Fatalf("New() failed: %v", err)
 	}
 
-	result := &parser.ParseResult{
-		Handlers: []parser.Handler{},
-		Structs:  make(map[string]*parser.Struct),
-		Source: parser.Source{
-			Package: "test",
-		},
+	result := &definition.Definition{
+		Operations: []*definition.Operation{},
+		Types:      make(map[string]*definition.Type),
+		Package:    "test",
 	}
 
 	_, err = gen.Generate(result)
@@ -50,38 +48,35 @@ func TestGenerate_SimpleHandler(t *testing.T) {
 	}
 
 	// Create a simple handler with a request struct
-	reqStruct := &parser.Struct{
+	reqType := &definition.Type{
 		Name: "CreateUserRequest",
-		Fields: []parser.Field{
+		Kind: "struct",
+		Fields: []*definition.Field{
 			{
-				Name:      "Name",
-				Type:      "string",
-				StructTag: `json:"name" validate:"required"`,
+				Name: "Name",
+				Type: &definition.Type{GoType: "string", Kind: "primitive"},
+				Tags: `json:"name" validate:"required"`,
 			},
 			{
-				Name:      "Email",
-				Type:      "string",
-				StructTag: `json:"email" validate:"required,email"`,
+				Name: "Email",
+				Type: &definition.Type{GoType: "string", Kind: "primitive"},
+				Tags: `json:"email" validate:"required,email"`,
 			},
 		},
 	}
 
-	handler := parser.Handler{
-		Name:       "CreateUser",
-		Package:    "test",
-		ParamType:  "CreateUserRequest",
-		ReturnType: "CreateUserResponse",
-		Struct:     reqStruct,
+	handler := &definition.Operation{
+		ID:          "CreateUser",
+		RequestType: "CreateUserRequest",
+		ReturnType:  "CreateUserResponse",
 	}
 
-	result := &parser.ParseResult{
-		Handlers: []parser.Handler{handler},
-		Structs: map[string]*parser.Struct{
-			"CreateUserRequest": reqStruct,
+	result := &definition.Definition{
+		Operations: []*definition.Operation{handler},
+		Types: map[string]*definition.Type{
+			"CreateUserRequest": reqType,
 		},
-		Source: parser.Source{
-			Package: "test",
-		},
+		Package: "test",
 	}
 
 	code, err := gen.Generate(result)
@@ -112,33 +107,30 @@ func TestGenerate_WithPathParameter(t *testing.T) {
 		t.Fatalf("New() failed: %v", err)
 	}
 
-	reqStruct := &parser.Struct{
+	reqType := &definition.Type{
 		Name: "GetUserRequest",
-		Fields: []parser.Field{
+		Kind: "struct",
+		Fields: []*definition.Field{
 			{
-				Name:      "UserID",
-				Type:      "string",
-				StructTag: `path:"userId"`,
+				Name: "UserID",
+				Type: &definition.Type{GoType: "string", Kind: "primitive"},
+				Tags: `path:"userId"`,
 			},
 		},
 	}
 
-	handler := parser.Handler{
-		Name:       "GetUser",
-		Package:    "test",
-		ParamType:  "GetUserRequest",
-		ReturnType: "GetUserResponse",
-		Struct:     reqStruct,
+	handler := &definition.Operation{
+		ID:          "GetUser",
+		RequestType: "GetUserRequest",
+		ReturnType:  "GetUserResponse",
 	}
 
-	result := &parser.ParseResult{
-		Handlers: []parser.Handler{handler},
-		Structs: map[string]*parser.Struct{
-			"GetUserRequest": reqStruct,
+	result := &definition.Definition{
+		Operations: []*definition.Operation{handler},
+		Types: map[string]*definition.Type{
+			"GetUserRequest": reqType,
 		},
-		Source: parser.Source{
-			Package: "test",
-		},
+		Package: "test",
 	}
 
 	code, err := gen.Generate(result)
@@ -160,33 +152,30 @@ func TestGenerate_UsesHandleResponse(t *testing.T) {
 		t.Fatalf("New() failed: %v", err)
 	}
 
-	reqStruct := &parser.Struct{
+	reqType := &definition.Type{
 		Name: "CreateUserRequest",
-		Fields: []parser.Field{
+		Kind: "struct",
+		Fields: []*definition.Field{
 			{
-				Name:      "Name",
-				Type:      "string",
-				StructTag: `json:"name"`,
+				Name: "Name",
+				Type: &definition.Type{GoType: "string", Kind: "primitive"},
+				Tags: `json:"name"`,
 			},
 		},
 	}
 
-	handler := parser.Handler{
-		Name:       "CreateUser",
-		Package:    "test",
-		ParamType:  "CreateUserRequest",
-		ReturnType: "CreateUserResponse",
-		Struct:     reqStruct,
+	handler := &definition.Operation{
+		ID:          "CreateUser",
+		RequestType: "CreateUserRequest",
+		ReturnType:  "CreateUserResponse",
 	}
 
-	result := &parser.ParseResult{
-		Handlers: []parser.Handler{handler},
-		Structs: map[string]*parser.Struct{
-			"CreateUserRequest": reqStruct,
+	result := &definition.Definition{
+		Operations: []*definition.Operation{handler},
+		Types: map[string]*definition.Type{
+			"CreateUserRequest": reqType,
 		},
-		Source: parser.Source{
-			Package: "test",
-		},
+		Package: "test",
 	}
 
 	code, err := gen.Generate(result)

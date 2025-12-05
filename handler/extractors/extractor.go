@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/reation-io/apikit/handler/parser"
+	"github.com/reation-io/apikit/core/definition"
 	"github.com/reation-io/apikit/handler/types"
 )
 
@@ -18,10 +18,10 @@ type Extractor interface {
 	Name() string
 
 	// CanExtract returns true if this extractor can handle the given field
-	CanExtract(field *parser.Field) bool
+	CanExtract(field *definition.Field) bool
 
 	// GenerateCode generates the extraction code for the field
-	GenerateCode(field *parser.Field, structName string) (string, []string)
+	GenerateCode(field *definition.Field, structName string) (string, []string)
 
 	// Priority returns the extraction priority (lower = earlier)
 	// Used to determine order of extraction (e.g., path before query)
@@ -52,7 +52,7 @@ func GetExtractors() []Extractor {
 }
 
 // GetExtractor returns the extractor for a given field
-func GetExtractor(field *parser.Field) Extractor {
+func GetExtractor(field *definition.Field) Extractor {
 	for _, e := range globalRegistry.extractors {
 		if e.CanExtract(field) {
 			return e
@@ -64,17 +64,17 @@ func GetExtractor(field *parser.Field) Extractor {
 // Helper functions for code generation
 
 // GetDefaultTag returns the default tag value from the field's struct tag
-func GetDefaultTag(field *parser.Field) string {
-	if field.StructTag == "" {
+func GetDefaultTag(field *definition.Field) string {
+	if field.Tags == "" {
 		return ""
 	}
-	tag := reflect.StructTag(field.StructTag)
+	tag := reflect.StructTag(field.Tags)
 	return tag.Get("default")
 }
 
-// GenerateExtractionCode generates code for extracting a value with optional default
+// GenerateExtractionCode generates code for converting a value with optional default
 // This is a generic helper to reduce code duplication
-func GenerateExtractionCode(varName, fieldName, typeName string, field *parser.Field, parsingFunc func(string, string) string, imports []string) (string, []string) {
+func GenerateExtractionCode(varName, fieldName, typeName string, field *definition.Field, parsingFunc func(string, string) string, imports []string) (string, []string) {
 	defaultTag := GetDefaultTag(field)
 	hasDefault := defaultTag != ""
 
@@ -165,10 +165,10 @@ func toCamelCase(s string) string {
 // Parameters:
 //   - field: The field to get the parameter name for
 //   - tagName: The name of the tag to look up (e.g., "query", "path", "header")
-func GetParameterName(field *parser.Field, tagName string) string {
+func GetParameterName(field *definition.Field, tagName string) string {
 	// Priority 1: Use tag value if available
-	if field.StructTag != "" {
-		tag := reflect.StructTag(field.StructTag)
+	if field.Tags != "" {
+		tag := reflect.StructTag(field.Tags)
 		if val, ok := tag.Lookup(tagName); ok {
 			// If tag exists but is empty, fall through to use field name
 			if val != "" {
@@ -177,15 +177,15 @@ func GetParameterName(field *parser.Field, tagName string) string {
 		}
 	}
 
-	// Priority 2: Use comment name if available
-	if field.InCommentName != "" {
-		return field.InCommentName
+	// Priority 2: Use comment name if available (from parser Metadata)
+	if val := field.Metadata["in_name"]; val != "" {
+		return val
 	}
 
 	// Priority 3: Use json tag value as fallback (handles omitempty)
-	if field.StructTag != "" {
-		tag := reflect.StructTag(field.StructTag)
-		if val, ok := tag.Lookup(parser.TagJSON); ok && val != "" {
+	if field.Tags != "" {
+		tag := reflect.StructTag(field.Tags)
+		if val, ok := tag.Lookup("json"); ok && val != "" {
 			// Handle "fieldName,omitempty" format - extract just the field name
 			if commaIdx := strings.Index(val, ","); commaIdx != -1 {
 				val = val[:commaIdx]
@@ -203,7 +203,7 @@ func GetParameterName(field *parser.Field, tagName string) string {
 // GenerateCodeByType generates extraction code based on the field type
 // This is a public helper that handles all type-specific parsing logic
 // Returns: (code, imports)
-func GenerateCodeByType(varName, fieldName, typeName string, field *parser.Field) (string, []string) {
+func GenerateCodeByType(varName, fieldName, typeName string, field *definition.Field) (string, []string) {
 	var imports []string
 	var code string
 
@@ -239,8 +239,13 @@ func GenerateCodeByType(varName, fieldName, typeName string, field *parser.Field
 		// Check if there's a custom type extractor registered in the Type Registry
 		if typeExtractor, ok := types.Get(typeName); ok {
 			// Use the registered ParseFunc to generate parsing code
+			// TODO: check if field.Type is a pointer - assuming field.Type.GoType string representation might need parsing
+			// For now, let's assume we can derive pointer status from typeName or field definition if needed.
+			// But definition.Field doesn't expose IsPointer directly on the struct, it's inside Type.
+			isPointer := strings.HasPrefix(field.Type.GoType, "*")
+
 			parsingFunc := func(v, f string) string {
-				return typeExtractor.ParseFunc(v, f, field.IsPointer)
+				return typeExtractor.ParseFunc(v, f, isPointer)
 			}
 
 			// Add import if specified
@@ -250,16 +255,20 @@ func GenerateCodeByType(varName, fieldName, typeName string, field *parser.Field
 
 			// Generate extraction code with the custom parser
 			code, imports = GenerateExtractionCode(varName, fieldName, typeName, field, parsingFunc, imports)
-		} else if !field.IsEmbedded {
+		} else {
 			// Fallback: for unknown custom types (e.g., enums), cast the string value
 			// This handles types like model.AgentStatus, model.UserRole, etc.
-			// BUT: Skip embedded structs - they should have been expanded by the parser
-			parsingFunc := func(v, f string) string {
-				return fmt.Sprintf(`payload.%s = %s(%s)`, f, typeName, v)
+			// BUT: Skip embedded structs - they should have been expanded by the parser?
+			// definition.Field doesn't explicitly flag IsEmbedded but parser expansion usually handles it.
+			// If Type.Kind == "struct", we shouldn't be here (GenerateExtractionCode handles primitives mostly)
+			if field.Type.Kind != "struct" {
+				parsingFunc := func(v, f string) string {
+					return fmt.Sprintf(`payload.%s = %s(%s)`, f, typeName, v)
+				}
+				code, imports = GenerateExtractionCode(varName, fieldName, typeName, field, parsingFunc, imports)
 			}
-			code, imports = GenerateExtractionCode(varName, fieldName, typeName, field, parsingFunc, imports)
 		}
-		// else: Embedded struct without extractor - skip (should have been expanded)
+		// else: Embedded struct without extractor - skip
 	}
 
 	return code, imports
@@ -268,7 +277,7 @@ func GenerateCodeByType(varName, fieldName, typeName string, field *parser.Field
 // GenerateSliceCodeByType generates code to parse a slice of values
 // This handles the standard HTTP pattern: ?tags=go&tags=api&tags=http
 // Returns: (code, imports)
-func GenerateSliceCodeByType(varName, fieldName, elementType string, field *parser.Field) (string, []string) {
+func GenerateSliceCodeByType(varName, fieldName, elementType string, field *definition.Field) (string, []string) {
 	var imports []string
 	var code string
 
@@ -393,13 +402,15 @@ func GenerateDefaultValue(fieldName, defaultValue, typeName string) string {
 }
 
 // GetBaseType returns the base type without pointer or slice
-func GetBaseType(field *parser.Field) string {
-	typeName := field.Type
-	if field.IsPointer {
-		typeName = strings.TrimPrefix(typeName, "*")
+func GetBaseType(field *definition.Field) string {
+	typeName := field.Type.GoType
+	// If it's a slice, the GoType might be []string, we need pure type
+	if strings.HasPrefix(typeName, "[]") {
+		// This assumes GoType is well-formed
+		return typeName[2:]
 	}
-	if field.IsSlice {
-		typeName = field.SliceType
+	if strings.HasPrefix(typeName, "*") {
+		return typeName[1:]
 	}
 	return typeName
 }

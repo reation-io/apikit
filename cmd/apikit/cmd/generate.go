@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/reation-io/apikit/core/parser"
 	"github.com/reation-io/apikit/handler/checksum"
 	"github.com/reation-io/apikit/handler/codegen"
 	_ "github.com/reation-io/apikit/handler/extractors"
-	"github.com/reation-io/apikit/handler/parser"
 	"github.com/spf13/cobra"
 )
 
@@ -105,8 +105,18 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		log.Printf("Processing %d file(s)...", len(resolvedFiles))
 	}
 
-	// Create a single parser instance to share cache across all files
-	p := parser.New()
+	// Create a single parser instance
+	// Note: core/parser currently accumulates definitions if reused potentially?
+	// New definition per file is safer unless we parse a package.
+	// But generateWithParser calls New() internally? No.
+	// Currently New() initializes maps.
+	// If we reuse 'p', definitions accumulate.
+	// The original code reused 'p'.
+	// But `core/parser` stores in `p.def`.
+	// We should probably create new parser per file OR support package mode.
+	// For file-by-file gen, let's create new parser unless we want aggregation.
+	// Given we output `<source>_apikit.go`, it's 1:1.
+	// So we should instantiate parser per file.
 
 	// Process each file
 	for i, sourceFilePath := range resolvedFiles {
@@ -114,7 +124,7 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 			log.Printf("[%d/%d] Processing %s", i+1, len(resolvedFiles), sourceFilePath)
 		}
 
-		if err := generateWithParser(p, sourceFilePath); err != nil {
+		if err := generateFile(sourceFilePath); err != nil {
 			return fmt.Errorf("processing %s: %w", sourceFilePath, err)
 		}
 	}
@@ -126,7 +136,7 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func generateWithParser(p *parser.Parser, sourceFilePath string) error {
+func generateFile(sourceFilePath string) error {
 	// Determine output file name
 	output := outputFile
 	if output == "" {
@@ -153,36 +163,24 @@ func generateWithParser(p *parser.Parser, sourceFilePath string) error {
 		log.Printf("Parsing %s...", sourceFilePath)
 	}
 
-	result, err := p.ParseFile(sourceFilePath)
+	p := parser.New()
+	def, err := p.ParseFile(sourceFilePath)
 	if err != nil {
 		return fmt.Errorf("parsing file: %w", err)
 	}
 
-	// Print warnings if any
-	if len(result.Warnings) > 0 && verbose {
-		for _, warning := range result.Warnings {
-			log.Printf("Warning: %s", warning)
-		}
-	}
-
-	// Check if any handlers were found
-	if len(result.Handlers) == 0 {
+	// Check if any operations were found
+	if len(def.Operations) == 0 {
 		if verbose {
-			log.Println("No handlers found with //apikit:handler comment")
+			log.Println("No handlers found")
 		}
 		return nil
 	}
 
 	if verbose {
-		log.Printf("Found %d handler(s):", len(result.Handlers))
-		for _, h := range result.Handlers {
-			log.Printf("  - %s", h.Name)
-			if h.HasResponseWriter {
-				log.Printf("    → with http.ResponseWriter")
-			}
-			if h.HasRequest {
-				log.Printf("    → with *http.Request")
-			}
+		log.Printf("Found %d handler(s):", len(def.Operations))
+		for _, op := range def.Operations {
+			log.Printf("  - %s (%s %s)", op.ID, op.Method, op.Path)
 		}
 	}
 
@@ -197,7 +195,7 @@ func generateWithParser(p *parser.Parser, sourceFilePath string) error {
 		log.Println("Generating wrapper code...")
 	}
 
-	code, err := gen.Generate(result)
+	code, err := gen.Generate(def)
 	if err != nil {
 		return fmt.Errorf("generating code: %w", err)
 	}

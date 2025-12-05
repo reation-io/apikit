@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reation-io/apikit/handler/parser"
+	"github.com/reation-io/apikit/core/parser"
 )
 
 func TestGenerate_WithFormFields(t *testing.T) {
@@ -179,4 +179,3 @@ func Upload(ctx context.Context, req UploadRequest) (UploadResponse, error) {
 		t.Error("comment name should not be used for file field when tag is present")
 	}
 }
-

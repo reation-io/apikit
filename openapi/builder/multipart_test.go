@@ -5,7 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/reation-io/apikit/core/ast"
+	"github.com/reation-io/apikit/core/definition"
+	"github.com/reation-io/apikit/core/parser"
 )
 
 func TestMultipartFormDataGeneration(t *testing.T) {
@@ -49,13 +50,13 @@ type UploadFileRoute struct{}
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	parser := ast.New()
-	result, err := parser.Parse(testFile)
+	p := parser.New()
+	def, err := p.ParseFile(testFile)
 	if err != nil {
 		t.Fatalf("ParseFile failed: %v", err)
 	}
 
-	openapi, err := ExtractFromGeneric([]*ast.ParseResult{result})
+	openapi, err := ExtractFromGeneric([]*definition.Definition{def})
 	if err != nil {
 		t.Fatalf("ExtractFromGeneric failed: %v", err)
 	}

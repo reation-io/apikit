@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/reation-io/apikit/core/definition"
 	"github.com/reation-io/apikit/handler/parser"
 )
 
@@ -19,28 +20,27 @@ func (e *CookieExtractor) Name() string {
 }
 
 func (e *CookieExtractor) Priority() int {
-	return 35 // Extract cookies after headers but before body
+	return 35 // Extract cookies after headers
 }
 
-func (e *CookieExtractor) CanExtract(field *parser.Field) bool {
-	// Check if field has cookie tag
-	if field.StructTag != "" {
-		tag := reflect.StructTag(field.StructTag)
+func (e *CookieExtractor) CanExtract(field *definition.Field) bool {
+	// check existing tags in field.Tags
+	if field.Tags != "" {
+		tag := reflect.StructTag(field.Tags)
 		if _, ok := tag.Lookup(parser.TagCookie); ok {
 			return true
 		}
 	}
-	// Check if field is marked with // in:cookie comment
-	return field.InComment == parser.SourceCookie
+	// check metadata for "in"
+	return field.Metadata["in"] == parser.SourceCookie
 }
 
-func (e *CookieExtractor) GenerateCode(field *parser.Field, structName string) (string, []string) {
+func (e *CookieExtractor) GenerateCode(field *definition.Field, structName string) (string, []string) {
 	cookieName := GetParameterName(field, parser.TagCookie)
 	fieldName := field.Name
 	typeName := GetBaseType(field)
 
-	varName := fmt.Sprintf(`apikit.GetCookie(r, "%s")`, cookieName)
+	varName := fmt.Sprintf(`func() string { if c, err := r.Cookie("%s"); err == nil { return c.Value } else { return "" } }()`, cookieName)
 
-	// Use the public helper to generate code based on type
 	return GenerateCodeByType(varName, fieldName, typeName, field)
 }

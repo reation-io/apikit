@@ -3,7 +3,7 @@ package extractors
 import (
 	"testing"
 
-	"github.com/reation-io/apikit/handler/parser"
+	"github.com/reation-io/apikit/core/definition"
 )
 
 func TestFormExtractor_Name(t *testing.T) {
@@ -25,60 +25,57 @@ func TestFormExtractor_CanExtract(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		field    parser.Field
+		field    definition.Field
 		expected bool
 	}{
 		{
 			name: "field with form tag",
-			field: parser.Field{
-				Name:      "Title",
-				Type:      "string",
-				StructTag: `form:"title"`,
+			field: definition.Field{
+				Name: "Title",
+				Type: &definition.Type{GoType: "string", Kind: "primitive"},
+				Tags: `form:"title"`,
 			},
 			expected: true,
 		},
 		{
 			name: "field with in:form comment",
-			field: parser.Field{
-				Name:      "Description",
-				Type:      "string",
-				InComment: "form",
+			field: definition.Field{
+				Name:     "Description",
+				Type:     &definition.Type{GoType: "string", Kind: "primitive"},
+				Metadata: map[string]string{"in": "form"},
 			},
 			expected: true,
 		},
 		{
 			name: "file field",
-			field: parser.Field{
-				Name:      "Image",
-				Type:      "*multipart.FileHeader",
-				StructTag: `form:"image"`,
-				IsFile:    true,
+			field: definition.Field{
+				Name: "Image",
+				Type: &definition.Type{GoType: "*multipart.FileHeader", Kind: "pointer"},
+				Tags: `form:"image"`,
 			},
 			expected: true,
 		},
 		{
 			name: "field without form tag or comment",
-			field: parser.Field{
+			field: definition.Field{
 				Name: "Other",
-				Type: "string",
+				Type: &definition.Type{GoType: "string", Kind: "primitive"},
 			},
 			expected: false,
 		},
 		{
 			name: "request field",
-			field: parser.Field{
-				Name:      "Request",
-				Type:      "*http.Request",
-				IsRequest: true,
+			field: definition.Field{
+				Name: "Request",
+				Type: &definition.Type{GoType: "*http.Request", Kind: "pointer"},
 			},
 			expected: false,
 		},
 		{
 			name: "response writer field",
-			field: parser.Field{
-				Name:             "Writer",
-				Type:             "http.ResponseWriter",
-				IsResponseWriter: true,
+			field: definition.Field{
+				Name: "Writer",
+				Type: &definition.Type{GoType: "http.ResponseWriter", Kind: "interface"},
 			},
 			expected: false,
 		},
@@ -97,10 +94,10 @@ func TestFormExtractor_CanExtract(t *testing.T) {
 func TestFormExtractor_GenerateCode_RegularField(t *testing.T) {
 	e := &FormExtractor{}
 
-	field := &parser.Field{
-		Name:      "Title",
-		Type:      "string",
-		StructTag: `form:"title"`,
+	field := &definition.Field{
+		Name: "Title",
+		Type: &definition.Type{GoType: "string", Kind: "primitive"},
+		Tags: `form:"title"`,
 	}
 
 	code, imports := e.GenerateCode(field, "TestStruct")
@@ -120,11 +117,10 @@ func TestFormExtractor_GenerateCode_RegularField(t *testing.T) {
 func TestFormExtractor_GenerateCode_FileField(t *testing.T) {
 	e := &FormExtractor{}
 
-	field := &parser.Field{
-		Name:      "Image",
-		Type:      "*multipart.FileHeader",
-		StructTag: `form:"image"`,
-		IsFile:    true,
+	field := &definition.Field{
+		Name: "Image",
+		Type: &definition.Type{GoType: "*multipart.FileHeader", Kind: "pointer"},
+		Tags: `form:"image"`,
 	}
 
 	code, imports := e.GenerateCode(field, "TestStruct")
@@ -148,4 +144,3 @@ func TestFormExtractor_GenerateCode_FileField(t *testing.T) {
 
 	t.Logf("Generated code:\n%s", code)
 }
-
