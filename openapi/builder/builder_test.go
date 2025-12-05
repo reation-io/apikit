@@ -9,7 +9,13 @@ import (
 
 func TestBuilder_Meta(t *testing.T) {
 	// Create a temporary directory
+	// Create a temporary directory
 	tmpDir := t.TempDir()
+
+	// Create go.mod
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+		t.Fatalf("failed to write go.mod: %v", err)
+	}
 
 	// Create a test file with swagger:meta
 	testFile := filepath.Join(tmpDir, "api.go")
@@ -50,7 +56,13 @@ type API struct{}
 
 func TestBuilder_Route(t *testing.T) {
 	// Create a temporary directory
+	// Create a temporary directory
 	tmpDir := t.TempDir()
+
+	// Create go.mod
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+		t.Fatalf("failed to write go.mod: %v", err)
+	}
 
 	// Create a test file with swagger:route
 	testFile := filepath.Join(tmpDir, "handlers.go")
@@ -98,7 +110,13 @@ type CreateUserRequest struct{}
 
 func TestBuilder_Model(t *testing.T) {
 	// Create a temporary directory
+	// Create a temporary directory
 	tmpDir := t.TempDir()
+
+	// Create go.mod
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+		t.Fatalf("failed to write go.mod: %v", err)
+	}
 
 	// Create a test file with swagger:model
 	testFile := filepath.Join(tmpDir, "models.go")
@@ -268,6 +286,11 @@ func TestBuilder_Validation(t *testing.T) {
 	t.Run("validation enabled catches errors", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
+		// Create go.mod
+		if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+			t.Fatalf("failed to write go.mod: %v", err)
+		}
+
 		// Create a test file with invalid route (operation without responses)
 		testFile := filepath.Join(tmpDir, "api.go")
 		content := `package main
@@ -294,6 +317,11 @@ type ListUsersRequest struct{}
 
 	t.Run("validation disabled allows invalid spec", func(t *testing.T) {
 		tmpDir := t.TempDir()
+
+		// Create go.mod
+		if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+			t.Fatalf("failed to write go.mod: %v", err)
+		}
 
 		// Create a test file with invalid spec (missing title)
 		testFile := filepath.Join(tmpDir, "api.go")
@@ -335,6 +363,11 @@ type API struct{}
 
 func TestBuilder_SwaggerIgnore(t *testing.T) {
 	tmpDir := t.TempDir()
+
+	// Create go.mod
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+		t.Fatalf("failed to write go.mod: %v", err)
+	}
 
 	t.Run("ignores fields in models", func(t *testing.T) {
 		testFile := filepath.Join(tmpDir, "models.go")

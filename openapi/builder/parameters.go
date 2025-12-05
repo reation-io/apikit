@@ -14,17 +14,49 @@ func (b *Builder) parseRequestStruct(structType *ast.StructType, operation *spec
 
 // parseRequestStructWithIgnored extracts parameters, filtering out ignored ones
 func (b *Builder) parseRequestStructWithIgnored(structType *ast.StructType, operation *spec.Operation, ignoredParams []string) {
-	if structType == nil || structType.Fields == nil {
-		return
+	// Combine ignored parameters
+	allIgnored := make([]string, 0, len(ignoredParams)+len(operation.IgnoredParameters))
+	allIgnored = append(allIgnored, ignoredParams...)
+	allIgnored = append(allIgnored, operation.IgnoredParameters...)
+
+	params, body := b.extractParameters(structType, allIgnored)
+
+	// Attach parameters
+	if len(params) > 0 {
+		operation.Parameters = append(operation.Parameters, params...)
 	}
+
+	// Attach request body
+	if body != nil {
+		if operation.RequestBody == nil {
+			operation.RequestBody = body
+		} else {
+			// Merge content
+			if operation.RequestBody.Description == "" {
+				operation.RequestBody.Description = body.Description
+			}
+			if operation.RequestBody.Content == nil {
+				operation.RequestBody.Content = make(map[string]*spec.MediaType)
+			}
+			for k, v := range body.Content {
+				operation.RequestBody.Content[k] = v
+			}
+		}
+	}
+}
+
+// extractParameters extracts parameters and request body from a struct
+func (b *Builder) extractParameters(structType *ast.StructType, ignoredParams []string) ([]*spec.Parameter, *spec.RequestBody) {
+	if structType == nil || structType.Fields == nil {
+		return nil, nil
+	}
+
+	var parameters []*spec.Parameter
+	var requestBody *spec.RequestBody
 
 	// Build a map for quick lookup of ignored parameters
 	ignoredMap := make(map[string]bool)
 	for _, p := range ignoredParams {
-		ignoredMap[p] = true
-	}
-	// Also add ignored parameters from operation
-	for _, p := range operation.IgnoredParameters {
 		ignoredMap[p] = true
 	}
 
@@ -94,7 +126,18 @@ func (b *Builder) parseRequestStructWithIgnored(structType *ast.StructType, oper
 
 		// Handle body parameters specially
 		if inValue == "body" {
-			b.handleBodyParameter(field, operation)
+			body := b.createBodyParameter(field)
+			if requestBody == nil {
+				requestBody = body
+			} else {
+				// Merge content types if multiple body fields exist (edge case)
+				if body.Description != "" && requestBody.Description == "" {
+					requestBody.Description = body.Description
+				}
+				for k, v := range body.Content {
+					requestBody.Content[k] = v
+				}
+			}
 			continue
 		}
 
@@ -143,17 +186,18 @@ func (b *Builder) parseRequestStructWithIgnored(structType *ast.StructType, oper
 			param.Schema.Enum = enumAny
 		}
 
-		// Add parameter to operation
-		operation.Parameters = append(operation.Parameters, param)
+		parameters = append(parameters, param)
 	}
+
+	return parameters, requestBody
 }
 
-// handleBodyParameter creates a request body from a body field
-func (b *Builder) handleBodyParameter(field *ast.Field, operation *spec.Operation) {
+// createBodyParameter creates a request body from a body field
+func (b *Builder) createBodyParameter(field *ast.Field) *spec.RequestBody {
 	// Get the type name for the body
 	typeName := b.getTypeName(field.Type)
 	if typeName == "" {
-		return
+		return nil
 	}
 
 	// Get description from comment
@@ -176,22 +220,10 @@ func (b *Builder) handleBodyParameter(field *ast.Field, operation *spec.Operatio
 		isArray = true
 	}
 
-	// Create request body if it doesn't exist
-	if operation.RequestBody == nil {
-		operation.RequestBody = &spec.RequestBody{
-			Description: description,
-			Required:    true,
-			Content:     make(map[string]*spec.MediaType),
-		}
-	} else {
-		// Update description if not set
-		if operation.RequestBody.Description == "" {
-			operation.RequestBody.Description = description
-		}
-		// Ensure Content map exists
-		if operation.RequestBody.Content == nil {
-			operation.RequestBody.Content = make(map[string]*spec.MediaType)
-		}
+	requestBody := &spec.RequestBody{
+		Description: description,
+		Required:    true,
+		Content:     make(map[string]*spec.MediaType),
 	}
 
 	var schema *spec.Schema
@@ -210,26 +242,18 @@ func (b *Builder) handleBodyParameter(field *ast.Field, operation *spec.Operatio
 		}
 	}
 
-	// If content types are already defined (e.g. by Consumes), update them with schema
-	if len(operation.RequestBody.Content) > 0 {
-		for _, mediaType := range operation.RequestBody.Content {
-			if mediaType.Schema == nil {
-				mediaType.Schema = schema
-			}
-		}
-		return
+	// Add default content types
+	requestBody.Content["application/json"] = &spec.MediaType{
+		Schema: schema,
+	}
+	requestBody.Content["application/xml"] = &spec.MediaType{
+		Schema: schema,
+	}
+	requestBody.Content["application/x-www-form-urlencoded"] = &spec.MediaType{
+		Schema: schema,
 	}
 
-	// Otherwise add default content types
-	operation.RequestBody.Content["application/json"] = &spec.MediaType{
-		Schema: schema,
-	}
-	operation.RequestBody.Content["application/xml"] = &spec.MediaType{
-		Schema: schema,
-	}
-	operation.RequestBody.Content["application/x-www-form-urlencoded"] = &spec.MediaType{
-		Schema: schema,
-	}
+	return requestBody
 }
 
 // getTypeName extracts the type name from an ast expression

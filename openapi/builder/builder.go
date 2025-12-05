@@ -18,12 +18,20 @@ import (
 
 // Builder builds an OpenAPI specification from Go source files
 type Builder struct {
-	spec         *spec.OpenAPI
-	document     *spec.OpenAPI // alias for spec (used by embedded.go)
-	fset         *token.FileSet
-	config       *BuilderConfig
-	files        map[string]*ast.File // Cached files from scanner
-	enumRegistry *spec.EnumRegistry   // Registry of discovered enums
+	spec          *spec.OpenAPI
+	document      *spec.OpenAPI // alias for spec (used by embedded.go)
+	fset          *token.FileSet
+	config        *BuilderConfig
+	files         map[string]*ast.File // Cached files from scanner
+	enumRegistry  *spec.EnumRegistry   // Registry of discovered enums
+	operations    map[string]*spec.Operation
+	pendingParams map[string][]ParameterGroup
+}
+
+// ParameterGroup holds parameters and body to be attached to an operation
+type ParameterGroup struct {
+	Parameters  []*spec.Parameter
+	RequestBody *spec.RequestBody
 }
 
 // NewBuilder creates a new OpenAPI builder
@@ -72,12 +80,14 @@ func NewBuilderWithOptions(opts ...Option) *Builder {
 		},
 	}
 	return &Builder{
-		spec:         openAPISpec,
-		document:     openAPISpec,
-		fset:         token.NewFileSet(),
-		config:       config,
-		files:        make(map[string]*ast.File),
-		enumRegistry: spec.NewEnumRegistry(),
+		spec:          openAPISpec,
+		document:      openAPISpec,
+		fset:          token.NewFileSet(),
+		config:        config,
+		files:         make(map[string]*ast.File),
+		enumRegistry:  spec.NewEnumRegistry(),
+		operations:    make(map[string]*spec.Operation),
+		pendingParams: make(map[string][]ParameterGroup),
 	}
 }
 
@@ -99,6 +109,9 @@ func (b *Builder) Build() (*spec.OpenAPI, error) {
 			return nil, fmt.Errorf("failed to process file %s: %w", filePath, err)
 		}
 	}
+
+	// Resolve pending parameters
+	b.resolvePendingParameters()
 
 	// Validate if enabled
 	if b.config.Validation {
@@ -128,6 +141,11 @@ func (b *Builder) validate() error {
 
 // processFile processes a pre-parsed AST file (used with scanner)
 func (b *Builder) processFile(filePath string, file *ast.File) error {
+	// Look for swagger:parameters comments
+	if err := b.parseParameters(file); err != nil {
+		return fmt.Errorf("failed to parse parameters: %w", err)
+	}
+
 	// Look for swagger:enum comments (first, so models can reference enums)
 	if err := b.parseEnums(file); err != nil {
 		return fmt.Errorf("failed to parse enums: %w", err)
@@ -255,6 +273,11 @@ func (b *Builder) parseRoutes(file *ast.File) error {
 			pathItem.Options = operation
 		case constants.MethodHEAD:
 			pathItem.Head = operation
+		}
+
+		// Register operation
+		if operation.OperationID != "" {
+			b.operations[operation.OperationID] = operation
 		}
 	}
 
@@ -821,4 +844,96 @@ func containsString(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// parseParameters parses swagger:parameters comments
+func (b *Builder) parseParameters(file *ast.File) error {
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || genDecl.Doc == nil {
+			continue
+		}
+
+		// Check for swagger:parameters
+		if !hasDirective(genDecl.Doc, constants.DirectiveParameters) {
+			continue
+		}
+
+		// Extract Operation IDs
+		var opIDs []string
+		for _, comment := range genDecl.Doc.List {
+			text := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
+			if strings.HasPrefix(text, constants.DirectiveParameters) {
+				parts := strings.Fields(text)
+				if len(parts) > 1 {
+					opIDs = append(opIDs, parts[1:]...)
+				}
+			}
+		}
+
+		if len(opIDs) == 0 {
+			continue
+		}
+
+		// Find and process the struct type
+		for _, s := range genDecl.Specs {
+			typeSpec, ok := s.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+
+			structType, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				continue
+			}
+
+			params, body := b.extractParameters(structType, nil)
+
+			group := ParameterGroup{
+				Parameters:  params,
+				RequestBody: body,
+			}
+
+			for _, opID := range opIDs {
+				b.pendingParams[opID] = append(b.pendingParams[opID], group)
+			}
+		}
+	}
+	return nil
+}
+
+// resolvePendingParameters attaches pending parameters to operations
+func (b *Builder) resolvePendingParameters() {
+	for opID, groups := range b.pendingParams {
+		operation, ok := b.operations[opID]
+		if !ok {
+			// Operation not found (maybe defined in another package not scanned, or typo)
+			continue
+		}
+
+		for _, group := range groups {
+			// Append parameters
+			if len(group.Parameters) > 0 {
+				operation.Parameters = append(operation.Parameters, group.Parameters...)
+			}
+
+			// Merge request body
+			if group.RequestBody != nil {
+				if operation.RequestBody == nil {
+					operation.RequestBody = group.RequestBody
+				} else {
+					// Merge content
+					if operation.RequestBody.Description == "" {
+						operation.RequestBody.Description = group.RequestBody.Description
+					}
+					if operation.RequestBody.Content == nil {
+						operation.RequestBody.Content = make(map[string]*spec.MediaType)
+					}
+					for k, v := range group.RequestBody.Content {
+						operation.RequestBody.Content[k] = v
+					}
+				}
+			}
+		}
+	}
 }

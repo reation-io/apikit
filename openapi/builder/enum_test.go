@@ -10,6 +10,11 @@ func TestBuilder_Enum(t *testing.T) {
 	t.Run("basic enum parsing", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
+		// Create go.mod
+		if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+			t.Fatalf("failed to write go.mod: %v", err)
+		}
+
 		// Create a test file with swagger:enum
 		testFile := filepath.Join(tmpDir, "status.go")
 		content := `package main
@@ -30,7 +35,10 @@ const (
 		}
 
 		// Build the spec
-		builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+		builder := NewBuilderWithOptions(
+			WithDir(tmpDir),
+			WithPattern("."),
+		)
 		_, err := builder.Build()
 		if err != nil {
 			t.Fatalf("failed to build spec: %v", err)
@@ -63,6 +71,11 @@ const (
 	t.Run("enum with custom name", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
+		// Create go.mod
+		if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+			t.Fatalf("failed to write go.mod: %v", err)
+		}
+
 		testFile := filepath.Join(tmpDir, "role.go")
 		content := `package main
 
@@ -79,7 +92,10 @@ const (
 			t.Fatalf("failed to write test file: %v", err)
 		}
 
-		builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+		builder := NewBuilderWithOptions(
+			WithDir(tmpDir),
+			WithPattern("."),
+		)
 		_, err := builder.Build()
 		if err != nil {
 			t.Fatalf("failed to build spec: %v", err)
@@ -100,6 +116,11 @@ const (
 
 	t.Run("enum field in model", func(t *testing.T) {
 		tmpDir := t.TempDir()
+
+		// Create go.mod
+		if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+			t.Fatalf("failed to write go.mod: %v", err)
+		}
 
 		testFile := filepath.Join(tmpDir, "models.go")
 		content := `package main
@@ -122,7 +143,10 @@ type User struct {
 			t.Fatalf("failed to write test file: %v", err)
 		}
 
-		builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+		builder := NewBuilderWithOptions(
+			WithDir(tmpDir),
+			WithPattern("."),
+		)
 		spec, err := builder.Build()
 		if err != nil {
 			t.Fatalf("failed to build spec: %v", err)
@@ -152,6 +176,11 @@ type User struct {
 	t.Run("integer enum", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
+		// Create go.mod
+		if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test\n\ngo 1.20\n"), 0644); err != nil {
+			t.Fatalf("failed to write go.mod: %v", err)
+		}
+
 		testFile := filepath.Join(tmpDir, "priority.go")
 		content := `package main
 
@@ -168,7 +197,10 @@ const (
 			t.Fatalf("failed to write test file: %v", err)
 		}
 
-		builder := NewBuilder(filepath.Join(tmpDir, "*.go"))
+		builder := NewBuilderWithOptions(
+			WithDir(tmpDir),
+			WithPattern("."),
+		)
 		_, err := builder.Build()
 		if err != nil {
 			t.Fatalf("failed to build spec: %v", err)
