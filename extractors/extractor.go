@@ -1,65 +1,15 @@
-// Package extractors provides a registry of parameter extractors for different sources
+// Package extractors provides framework-specific parameter extraction for HTTP handlers
 package extractors
 
 import (
 	"fmt"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/reation-io/apikit/parser"
 	"github.com/reation-io/apikit/types"
 )
-
-// Extractor defines how to extract a parameter from an HTTP request
-type Extractor interface {
-	// Name returns the extractor name (e.g., "path", "query", "header", "body")
-	Name() string
-
-	// CanExtract returns true if this extractor can handle the given field
-	CanExtract(field *parser.Field) bool
-
-	// GenerateCode generates the extraction code for the field
-	GenerateCode(field *parser.Field, structName string) (string, []string)
-
-	// Priority returns the extraction priority (lower = earlier)
-	// Used to determine order of extraction (e.g., path before query)
-	Priority() int
-}
-
-// Registry holds all registered extractors
-type Registry struct {
-	extractors []Extractor
-}
-
-// Global registry instance
-var globalRegistry = &Registry{
-	extractors: []Extractor{},
-}
-
-// Register adds an extractor to the global registry
-func Register(e Extractor) {
-	globalRegistry.extractors = append(globalRegistry.extractors, e)
-	slices.SortFunc(globalRegistry.extractors, func(e1, e2 Extractor) int {
-		return e1.Priority() - e2.Priority()
-	})
-}
-
-// GetExtractors returns all registered extractors sorted by priority
-func GetExtractors() []Extractor {
-	return globalRegistry.extractors
-}
-
-// GetExtractor returns the extractor for a given field
-func GetExtractor(field *parser.Field) Extractor {
-	for _, e := range globalRegistry.extractors {
-		if e.CanExtract(field) {
-			return e
-		}
-	}
-	return nil
-}
 
 // Helper functions for code generation
 

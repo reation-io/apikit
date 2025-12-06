@@ -16,23 +16,43 @@ import (
 	"golang.org/x/tools/imports"
 )
 
-//go:embed templates/handler.tmpl
-var handlerTemplate string
+//go:embed templates/http_handler.tmpl
+var httpHandlerTemplate string
+
+//go:embed templates/fiber_handler.tmpl
+var fiberHandlerTemplate string
 
 // Generator generates wrapper code for handlers using the extractor system
 type Generator struct {
-	tmpl *template.Template
+	tmpl      *template.Template
+	framework extractors.FrameworkExtractor
 }
 
-// New creates a new code generator
+// New creates a new code generator for net/http (default)
 func New() (*Generator, error) {
-	tmpl, err := template.New("handler").Funcs(templateFuncs()).Parse(handlerTemplate)
+	return NewWithFramework("http")
+}
+
+// NewWithFramework creates a new code generator for the specified framework
+func NewWithFramework(frameworkName string) (*Generator, error) {
+	fw := extractors.GetFramework(frameworkName)
+
+	var templateStr string
+	switch frameworkName {
+	case "fiber":
+		templateStr = fiberHandlerTemplate
+	default:
+		templateStr = httpHandlerTemplate
+	}
+
+	tmpl, err := template.New("handler").Funcs(templateFuncs()).Parse(templateStr)
 	if err != nil {
 		return nil, fmt.Errorf("parsing template: %w", err)
 	}
 
 	return &Generator{
-		tmpl: tmpl,
+		tmpl:      tmpl,
+		framework: fw,
 	}, nil
 }
 
@@ -175,10 +195,7 @@ func (g *Generator) prepareHandlerData(handler *parser.Handler, importsMap map[s
 func (g *Generator) generateExtractionCode(s *parser.Struct, importsMap map[string]bool) string {
 	var lines []string
 
-	// Get all registered extractors (already sorted by priority)
-	allExtractors := extractors.GetExtractors()
-
-	// Process each field
+	// Process each field using the framework extractor
 	for _, field := range s.Fields {
 		// Handle embedded structs - expand their fields
 		if field.IsEmbedded {
@@ -196,25 +213,176 @@ func (g *Generator) generateExtractionCode(s *parser.Struct, importsMap map[stri
 			continue
 		}
 
-		// Find the appropriate extractor for this field
-		for _, ext := range allExtractors {
-			if ext.CanExtract(&field) {
-				code, imports := ext.GenerateCode(&field, s.Name)
-				if code != "" {
-					// Add imports
-					for _, imp := range imports {
-						importsMap[imp] = true
-					}
-
-					// Add code (extractors are already sorted by priority)
-					lines = append(lines, code)
+		// Skip special fields
+		if field.IsRequest || field.IsResponseWriter {
+			code, imports := g.extractSpecialField(&field)
+			if code != "" {
+				for _, imp := range imports {
+					importsMap[imp] = true
 				}
-				break // Only use the first matching extractor
+				lines = append(lines, code)
 			}
+			continue
+		}
+
+		// Generate extraction code based on field source
+		code, imports := g.extractField(&field)
+		if code != "" {
+			for _, imp := range imports {
+				importsMap[imp] = true
+			}
+			lines = append(lines, code)
 		}
 	}
 
 	return strings.Join(lines, "\n\t")
+}
+
+// extractField generates extraction code for a regular field
+func (g *Generator) extractField(field *parser.Field) (string, []string) {
+	return g.extractFieldWithPath(field, field.Name)
+}
+
+// extractFieldWithPath generates extraction code with a custom field path (for nested fields)
+func (g *Generator) extractFieldWithPath(field *parser.Field, fieldPath string) (string, []string) {
+	paramName := extractors.GetParameterName(field, g.getTagForSource(field))
+
+	switch {
+	case field.InComment == parser.SourcePath || g.hasTag(field, parser.TagPath):
+		return g.framework.ExtractPath(field, paramName, fieldPath)
+
+	case field.InComment == parser.SourceQuery || g.hasTag(field, parser.TagQuery):
+		if field.IsSlice {
+			return g.framework.ExtractQuerySlice(field, paramName, fieldPath)
+		}
+		return g.framework.ExtractQuery(field, paramName, fieldPath)
+
+	case field.InComment == parser.SourceHeader || g.hasTag(field, parser.TagHeader):
+		if field.IsSlice {
+			return g.framework.ExtractHeaderSlice(field, paramName, fieldPath)
+		}
+		return g.framework.ExtractHeader(field, paramName, fieldPath)
+
+	case field.InComment == parser.SourceCookie || g.hasTag(field, parser.TagCookie):
+		return g.framework.ExtractCookie(field, paramName, fieldPath)
+
+	case field.InComment == parser.SourceForm || g.hasTag(field, parser.TagForm):
+		// Handle nested struct with in:form - extract its fields
+		if field.NestedStruct != nil {
+			return g.extractNestedFormFields(field.NestedStruct, fieldPath)
+		}
+		if field.IsFile {
+			if field.IsSlice {
+				return g.framework.ExtractFormFiles(field, paramName, fieldPath)
+			}
+			return g.framework.ExtractFormFile(field, paramName, fieldPath)
+		}
+		if field.IsSlice {
+			return g.framework.ExtractFormSlice(field, paramName, fieldPath)
+		}
+		return g.framework.ExtractForm(field, paramName, fieldPath)
+	}
+
+	// Body fields are handled in the template, not here
+	return "", nil
+}
+
+// extractNestedFormFields extracts fields from a nested struct marked with in:form
+func (g *Generator) extractNestedFormFields(nested *parser.Struct, parentPath string) (string, []string) {
+	var lines []string
+	var allImports []string
+
+	for _, nestedField := range nested.Fields {
+		// Skip special fields
+		if nestedField.IsRequest || nestedField.IsResponseWriter || nestedField.IsRawBody {
+			continue
+		}
+
+		// Check if nested field should be extracted as form field
+		hasFormTag := g.hasTag(&nestedField, parser.TagForm)
+
+		if hasFormTag || nestedField.InComment == parser.SourceForm {
+			fieldPath := parentPath + "." + nestedField.Name
+			paramName := extractors.GetParameterName(&nestedField, parser.TagForm)
+
+			var code string
+			var imports []string
+
+			if nestedField.IsFile {
+				if nestedField.IsSlice {
+					code, imports = g.framework.ExtractFormFiles(&nestedField, paramName, fieldPath)
+				} else {
+					code, imports = g.framework.ExtractFormFile(&nestedField, paramName, fieldPath)
+				}
+			} else if nestedField.IsSlice {
+				code, imports = g.framework.ExtractFormSlice(&nestedField, paramName, fieldPath)
+			} else {
+				code, imports = g.framework.ExtractForm(&nestedField, paramName, fieldPath)
+			}
+
+			if code != "" {
+				lines = append(lines, code)
+				allImports = append(allImports, imports...)
+			}
+		}
+	}
+
+	return strings.Join(lines, "\n\t"), allImports
+}
+
+// extractSpecialField handles *http.Request and http.ResponseWriter fields
+func (g *Generator) extractSpecialField(field *parser.Field) (string, []string) {
+	if field.IsRequest {
+		return g.framework.ExtractRequest(field)
+	}
+	if field.IsResponseWriter {
+		return g.framework.ExtractResponse(field)
+	}
+	return "", nil
+}
+
+// getTagForSource returns the tag name for a given field source
+func (g *Generator) getTagForSource(field *parser.Field) string {
+	switch field.InComment {
+	case parser.SourcePath:
+		return parser.TagPath
+	case parser.SourceQuery:
+		return parser.TagQuery
+	case parser.SourceHeader:
+		return parser.TagHeader
+	case parser.SourceCookie:
+		return parser.TagCookie
+	case parser.SourceForm:
+		return parser.TagForm
+	default:
+		// Check tags
+		if g.hasTag(field, parser.TagPath) {
+			return parser.TagPath
+		}
+		if g.hasTag(field, parser.TagQuery) {
+			return parser.TagQuery
+		}
+		if g.hasTag(field, parser.TagHeader) {
+			return parser.TagHeader
+		}
+		if g.hasTag(field, parser.TagCookie) {
+			return parser.TagCookie
+		}
+		if g.hasTag(field, parser.TagForm) {
+			return parser.TagForm
+		}
+		return ""
+	}
+}
+
+// hasTag checks if a field has a specific struct tag
+func (g *Generator) hasTag(field *parser.Field, tagName string) bool {
+	if field.StructTag == "" {
+		return false
+	}
+	tag := reflect.StructTag(field.StructTag)
+	_, ok := tag.Lookup(tagName)
+	return ok
 }
 
 func (g *Generator) hasBodyFields(s *parser.Struct) bool {

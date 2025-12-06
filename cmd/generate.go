@@ -18,6 +18,7 @@ var (
 	sourceFile string
 	outputFile string
 	force      bool
+	framework  string
 )
 
 // generateCmd represents the generate command
@@ -52,6 +53,7 @@ func init() {
 	generateCmd.Flags().StringVarP(&sourceFile, "file", "f", "", "source file to process (defaults to GOFILE env var)")
 	generateCmd.Flags().StringVarP(&outputFile, "output", "o", "", "output file (defaults to <source>_apikit.go)")
 	generateCmd.Flags().BoolVar(&force, "force", false, "force regeneration even if source hasn't changed")
+	generateCmd.Flags().StringVar(&framework, "framework", "http", "target framework: http (default), fiber")
 }
 
 func runGenerate(cmd *cobra.Command, args []string) error {
@@ -185,8 +187,8 @@ func generateWithParser(p *parser.Parser, sourceFilePath string) error {
 		}
 	}
 
-	// Create generator
-	gen, err := codegen.New()
+	// Create generator with specified framework
+	gen, err := codegen.NewWithFramework(framework)
 	if err != nil {
 		return fmt.Errorf("creating generator: %w", err)
 	}
