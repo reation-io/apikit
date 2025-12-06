@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reation-io/apikit/handler/parser"
+	"github.com/reation-io/apikit/parser"
 )
 
 func TestQueryExtractor_Name(t *testing.T) {

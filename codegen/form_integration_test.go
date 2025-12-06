@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/reation-io/apikit/handler/parser"
+	"github.com/reation-io/apikit/parser"
 )
 
 func TestGenerate_WithFormFields(t *testing.T) {

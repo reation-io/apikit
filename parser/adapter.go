@@ -5,7 +5,7 @@ import (
 	"go/ast"
 	"strings"
 
-	coreast "github.com/reation-io/apikit/core/ast"
+	coreast "github.com/reation-io/apikit/ast"
 )
 
 // ExtractFromGeneric extracts APIKit-specific information from generic parse result

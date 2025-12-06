@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/reation-io/apikit/handler/parser"
+	"github.com/reation-io/apikit/parser"
 )
 
 func init() {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	coreast "github.com/reation-io/apikit/core/ast"
+	coreast "github.com/reation-io/apikit/ast"
 )
 
 func TestExtractFromGeneric(t *testing.T) {
